@@ -6,6 +6,8 @@
   --color-text-danger:         #c83b3a;
   --color-text-warning:        #a96810;
   --color-text-success:        #2a6412;
+  --color-text-info:           #0c6fc7;
+  --color-background-info:     #e0f0ff;
   --color-background-primary:  #ffffff;
   --color-background-secondary:#f4f4f8;
   --color-background-danger:   #fde8e8;
@@ -31,6 +33,8 @@
     --color-text-primary:        #f0f0f7;
     --color-text-secondary:      #a0a0b8;
     --color-text-tertiary:       #6e6e88;
+    --color-text-info:           #60aaff;
+    --color-background-info:     #0a1a30;
     --color-background-primary:  #12121e;
     --color-background-secondary:#1e1e2e;
     --color-border-primary:      #2e2e42;
