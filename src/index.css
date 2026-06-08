@@ -1,0 +1,45 @@
+:root {
+  /* VisualCheck design tokens */
+  --color-text-primary:        #0f0f23;
+  --color-text-secondary:      #6b6b82;
+  --color-text-tertiary:       #9191a8;
+  --color-text-danger:         #c83b3a;
+  --color-text-warning:        #a96810;
+  --color-text-success:        #2a6412;
+  --color-background-primary:  #ffffff;
+  --color-background-secondary:#f4f4f8;
+  --color-background-danger:   #fde8e8;
+  --color-background-warning:  #fef3cd;
+  --color-background-success:  #e6f4d7;
+  --color-border-primary:      #d0d0da;
+  --color-border-secondary:    #e0e0ea;
+  --color-border-tertiary:     #ebebf3;
+  --border-radius-sm: 6px;
+  --border-radius-md: 10px;
+  --border-radius-lg: 14px;
+
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background: var(--color-background-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text-primary:        #f0f0f7;
+    --color-text-secondary:      #a0a0b8;
+    --color-text-tertiary:       #6e6e88;
+    --color-background-primary:  #12121e;
+    --color-background-secondary:#1e1e2e;
+    --color-border-primary:      #2e2e42;
+    --color-border-secondary:    #252535;
+    --color-border-tertiary:     #1e1e2e;
+  }
+}
+
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--color-background-primary); }
+#root { min-height: 100svh; }
