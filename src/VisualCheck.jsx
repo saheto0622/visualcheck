@@ -1,5 +1,9 @@
 ﻿import { useState, useRef, useEffect } from "react";
 import { supabase } from "./lib/supabase";
+import { getRisk, fromDb, toDb, VALIDACION_INFO } from "./lib/format";
+import { wrap, btnP, btnS } from "./lib/styles";
+import OptometristPanel from "./components/OptometristPanel";
+import AdminOptometrists from "./components/AdminOptometrists";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -50,14 +54,6 @@ const DIR_ROTATIONS = { "→": "rotate(0deg)", "←": "rotate(180deg)", "↑": "
 const R_GUIDE = { cx: 0.65, cy: 0.37, rx: 0.10, ry: 0.06 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function getRisk(lR, rR, as, qS) {
-  if (lR > 55 || rR > 55 || as > 60 || qS > 65)
-    return { label: "Requiere atención", tc: "var(--color-text-danger)",  bc: "var(--color-background-danger)" };
-  if (lR > 22 || rR > 22 || as > 28 || qS > 32)
-    return { label: "Riesgo moderado",   tc: "var(--color-text-warning)", bc: "var(--color-background-warning)" };
-  return   { label: "Bajo riesgo",       tc: "var(--color-text-success)", bc: "var(--color-background-success)" };
-}
-
 function sampleRegion(data, W, H, g) {
   let r = 0, gv = 0, b = 0, n = 0;
   const x0 = Math.max(0, Math.floor((g.cx - g.rx) * W));
@@ -80,39 +76,6 @@ function fallbackText(score) {
     : "Tus indicadores están dentro de parámetros normales según esta evaluación preventiva. Aun así, recomendamos un chequeo con un optómetra al menos una vez al año.\n\nMantener controles regulares es la mejor manera de detectar cambios antes de que se vuelvan problemas.\n\n¡Bien por preocuparte por tu salud visual! Un profesional puede confirmarte que todo está en orden.";
 }
 
-// ─── Supabase helpers ─────────────────────────────────────────────────────────
-function toDb(r) {
-  return {
-    id: r.id, fecha: r.fecha, nombre: r.nombre, cedula: r.cedula,
-    direccion: r.direccion, correo: r.correo, celular: r.celular,
-    overall: r.overall, left_red: r.leftRed, right_red: r.rightRed,
-    asym: r.asym, q_score: r.qScore, riesgo: r.riesgo, estado: r.estado,
-    acuidad: r.acuidad, astigmatismo: r.astigmatismo, vision_cerca: r.visionCerca,
-  };
-}
-function fromDb(row) {
-  return {
-    id: row.id, fecha: row.fecha, nombre: row.nombre, cedula: row.cedula,
-    direccion: row.direccion, correo: row.correo, celular: row.celular,
-    overall: row.overall, leftRed: row.left_red, rightRed: row.right_red,
-    asym: row.asym, qScore: row.q_score, riesgo: row.riesgo, estado: row.estado,
-    acuidad: row.acuidad, astigmatismo: row.astigmatismo, visionCerca: row.vision_cerca,
-  };
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const wrap = { maxWidth: 460, margin: "0 auto", padding: "1.25rem 1rem" };
-const btnP = {
-  width: "100%", padding: "13px", fontSize: 15, fontWeight: 500, cursor: "pointer",
-  background: "var(--color-text-primary)", color: "var(--color-background-primary)",
-  border: "none", borderRadius: "var(--border-radius-md)",
-};
-const btnS = {
-  width: "100%", padding: "11px", fontSize: 13, cursor: "pointer",
-  color: "var(--color-text-secondary)", background: "transparent",
-  border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)",
-};
-
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function VisualCheck() {
   const [screen,    setScreen]    = useState("welcome");
@@ -126,6 +89,8 @@ export default function VisualCheck() {
   const [adminPin,     setAdminPin]     = useState("");
   const [evaluaciones, setEvaluaciones] = useState([]);
   const [filtroRiesgo, setFiltroRiesgo] = useState("todos");
+  const [filtroValidacion, setFiltroValidacion] = useState("todos");
+  const [optometristas, setOptometristas] = useState([]);
   const [pdfLoading,   setPdfLoading]   = useState(false);
   // Visual tests states
   const [vtPhase,    setVtPhase]    = useState("intro"); // intro|acuity|astigmatism|near|summary
@@ -435,6 +400,29 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     } catch { setEvaluaciones([]); }
   }
 
+  async function loadOptometristas() {
+    try {
+      const { data, error } = await supabase.from("optometristas").select("*").eq("activo", true).order("nombre");
+      setOptometristas(error ? [] : (data || []));
+    } catch { setOptometristas([]); }
+  }
+
+  async function asignarOptometrista(id, optometristaId) {
+    const opt = optometristas.find(o => String(o.id) === String(optometristaId));
+    const updates = opt
+      ? { optometrista_id: opt.id, optometrista_nombre: opt.nombre, estado_validacion: "en revision" }
+      : { optometrista_id: null, optometrista_nombre: null, estado_validacion: "pendiente" };
+    try {
+      await supabase.from("evaluaciones").update(updates).eq("id", id);
+      setEvaluaciones(prev => prev.map(e => e.id === id ? {
+        ...e,
+        optometristaId: updates.optometrista_id,
+        optometristaNombre: updates.optometrista_nombre,
+        estadoValidacion: updates.estado_validacion,
+      } : e));
+    } catch(e) { console.error(e); }
+  }
+
   async function sendToSheets(record, url) {
     if (!url) return;
     try {
@@ -529,7 +517,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
   }
 
   function reset() {
-    setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setVtPhase("intro"); setAcuityLevel(0); setAcuityDir("→"); setVtResults({ acuity: null, astigmatism: null, near: null });
+    setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setFiltroValidacion("todos"); setVtPhase("intro"); setAcuityLevel(0); setAcuityDir("→"); setVtResults({ acuity: null, astigmatism: null, near: null });
   }
 
   // ── Welcome ────────────────────────────────────────────────────────────────
@@ -566,6 +554,11 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
           style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", marginTop: "1.75rem", cursor: "pointer", userSelect: "none", textAlign: "center" }}
           onClick={() => setScreen("admin_pin")}>
           ◆ Admin
+        </p>
+        <p
+          style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", marginTop: "0.5rem", cursor: "pointer", userSelect: "none", textAlign: "center" }}
+          onClick={() => setScreen("opt_login")}>
+          ◆ Optómetra
         </p>
       </div>
     </div>
@@ -968,16 +961,22 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         placeholder="PIN"
         value={adminPin}
         onChange={e => setAdminPin(e.target.value)}
-        onKeyDown={e => { if (e.key === "Enter" && adminPin === "visual2025") { loadEvals(); setScreen("admin"); setAdminPin(""); } }}
+        onKeyDown={e => { if (e.key === "Enter" && adminPin === "visual2025") { loadEvals(); loadOptometristas(); setScreen("admin"); setAdminPin(""); } }}
         style={{ width: "100%", padding: "12px", fontSize: 18, textAlign: "center", letterSpacing: 6, border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box", marginBottom: 8 }}
       />
       <button style={{ ...btnP, marginBottom: 8 }}
-        onClick={() => { if (adminPin === "visual2025") { loadEvals(); setScreen("admin"); setAdminPin(""); } else { setAdminPin(""); } }}>
+        onClick={() => { if (adminPin === "visual2025") { loadEvals(); loadOptometristas(); setScreen("admin"); setAdminPin(""); } else { setAdminPin(""); } }}>
         Entrar
       </button>
       <button style={btnS} onClick={() => { setAdminPin(""); setScreen("welcome"); }}>Volver</button>
     </div>
   );
+
+  // ── Optometrist Panel ─────────────────────────────────────────────────────
+  if (screen === "opt_login") return <OptometristPanel onExit={() => setScreen("welcome")} />;
+
+  // ── Admin: Optometrists management ────────────────────────────────────────
+  if (screen === "admin_optometristas") return <AdminOptometrists onBack={() => { loadOptometristas(); setScreen("admin"); }} />;
 
   // ── Admin Dashboard ───────────────────────────────────────────────────────
   if (screen === "admin") {
@@ -988,9 +987,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       "cita agendada":  { bg: "var(--color-background-warning)",   c: "var(--color-text-warning)" },
       "cliente":        { bg: "var(--color-background-success)",   c: "var(--color-text-success)" },
     };
-    const filtrados = filtroRiesgo === "todos"
-      ? evaluaciones
-      : evaluaciones.filter(e => e.riesgo === filtroRiesgo);
+    const filtrados = evaluaciones
+      .filter(e => filtroRiesgo === "todos" || e.riesgo === filtroRiesgo)
+      .filter(e => filtroValidacion === "todos" || (e.estadoValidacion || "pendiente") === filtroValidacion);
     const totalAlto  = evaluaciones.filter(e => e.riesgo === "Requiere atención").length;
     const totalMod   = evaluaciones.filter(e => e.riesgo === "Riesgo moderado").length;
     const totalBajo  = evaluaciones.filter(e => e.riesgo === "Bajo riesgo").length;
@@ -1008,6 +1007,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
             </button>
             <button onClick={() => { loadEvals(); }} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
               <i className="ti ti-refresh" aria-hidden="true" />
+            </button>
+            <button onClick={() => setScreen("admin_optometristas")} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
+              <i className="ti ti-stethoscope" aria-hidden="true" />
             </button>
             <button onClick={() => { loadEvals(); setScreen("admin_config"); }} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
               <i className="ti ti-settings" aria-hidden="true" />
@@ -1030,12 +1032,24 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 6, marginBottom: "1rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
           {[["todos","Todos"], ["Requiere atención","⚠ Alto"], ["Riesgo moderado","Moderado"], ["Bajo riesgo","Bajo"]].map(([val, lbl]) => (
             <button key={val} onClick={() => setFiltroRiesgo(val)}
               style={{ padding: "5px 10px", fontSize: 11, borderRadius: 20, cursor: "pointer", fontWeight: filtroRiesgo === val ? 500 : 400,
                 background: filtroRiesgo === val ? "var(--color-text-primary)" : "var(--color-background-secondary)",
                 color:      filtroRiesgo === val ? "var(--color-background-primary)" : "var(--color-text-secondary)",
+                border: "0.5px solid var(--color-border-secondary)" }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: "1rem", flexWrap: "wrap" }}>
+          {[["todos","Validación: todos"], ["pendiente","Sin asignar"], ["en revision","En revisión"], ["validada","Validada"]].map(([val, lbl]) => (
+            <button key={val} onClick={() => setFiltroValidacion(val)}
+              style={{ padding: "5px 10px", fontSize: 11, borderRadius: 20, cursor: "pointer", fontWeight: filtroValidacion === val ? 500 : 400,
+                background: filtroValidacion === val ? "var(--color-text-primary)" : "var(--color-background-secondary)",
+                color:      filtroValidacion === val ? "var(--color-background-primary)" : "var(--color-text-secondary)",
                 border: "0.5px solid var(--color-border-secondary)" }}>
               {lbl}
             </button>
@@ -1051,6 +1065,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
             {filtrados.map(ev => {
               const rk = getRisk(ev.leftRed, ev.rightRed, ev.asym, ev.qScore);
               const ec = ESTADO_COLORS[ev.estado] || ESTADO_COLORS["pendiente"];
+              const vc = VALIDACION_INFO[ev.estadoValidacion || "pendiente"] || VALIDACION_INFO["pendiente"];
               return (
                 <div key={ev.id} style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "12px 14px", background: "var(--color-background-primary)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
@@ -1067,8 +1082,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
                     {ev.celular && <span>· {ev.celular}</span>}
                     {ev.correo  && <span>· {ev.correo}</span>}
                     <span style={{ padding: "1px 6px", borderRadius: 10, background: rk.bc, color: rk.tc }}>{ev.riesgo}</span>
+                    <span style={{ padding: "1px 6px", borderRadius: 10, background: vc.bg, color: vc.c }}>{vc.label}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                     <a href={`https://wa.me/57${ev.celular?.replace(/\D/g,"")}?text=Hola%20${encodeURIComponent(ev.nombre)}%2C%20soy%20de%20VisualCheck.%20Vi%20tu%20evaluación%20y%20quería%20invitarte%20a%20una%20cita%20en%20nuestra%20óptica.`}
                        target="_blank" rel="noopener noreferrer"
                        style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 10px", fontSize: 11, fontWeight: 500, background: "#25D366", color: "#fff", borderRadius: "var(--border-radius-md)", textDecoration: "none" }}>
@@ -1079,6 +1095,25 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
                       {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <i className="ti ti-stethoscope" style={{ fontSize: 14, color: "var(--color-text-tertiary)" }} aria-hidden="true" />
+                    <select value={ev.optometristaId ?? ""} onChange={e => asignarOptometrista(ev.id, e.target.value)}
+                      style={{ flex: 1, padding: "5px 8px", fontSize: 11, borderRadius: "var(--border-radius-md)", border: "0.5px solid var(--color-border-secondary)", background: "var(--color-background-secondary)", color: "var(--color-text-secondary)", cursor: "pointer" }}>
+                      <option value="">Sin asignar</option>
+                      {optometristas.map(o => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                    </select>
+                  </div>
+                  {ev.estadoValidacion === "validada" && (
+                    <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: "var(--border-radius-md)", background: "var(--color-background-secondary)", fontSize: 11, color: "var(--color-text-secondary)" }}>
+                      <p style={{ margin: "0 0 4px", fontWeight: 500, color: "var(--color-text-primary)" }}>
+                        Fórmula validada{ev.optometristaNombre ? ` por ${ev.optometristaNombre}` : ""}
+                      </p>
+                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                        <span>OD: {ev.esferaOd ?? "—"} / {ev.cilindroOd ?? "—"} / {ev.ejeOd ?? "—"}° / Add {ev.adicionOd ?? "—"}</span>
+                        <span>OI: {ev.esferaOi ?? "—"} / {ev.cilindroOi ?? "—"} / {ev.ejeOi ?? "—"}° / Add {ev.adicionOi ?? "—"}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
