@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { wrap, btnP, btnS } from "../lib/styles";
 import { VT_TESTS } from "../lib/format";
 
@@ -694,23 +694,21 @@ export default function VisualTests({ onFinish }) {
 
   const step = STEPS[stepIdx];
 
+  const finishStep = useCallback((key, value, status) => {
+    setResults(prev => ({ ...prev, [key]: value }));
+    setVtStatus(prev => ({ ...prev, [key]: status }));
+    const nextIdx = stepIdx + 1;
+    if (nextIdx >= STEPS.length) setPhase("summary");
+    setStepIdx(nextIdx);
+  }, [stepIdx]);
+
   useEffect(() => {
     if (phase !== "test") return;
     const t = setTimeout(() => {
       finishStep(STEPS[stepIdx].key, "No completada (tiempo agotado)", "gray");
     }, TEST_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [phase, stepIdx]);
-
-  function finishStep(key, value, status) {
-    setResults(prev => ({ ...prev, [key]: value }));
-    setVtStatus(prev => ({ ...prev, [key]: status }));
-    setStepIdx(prev => {
-      const nextIdx = prev + 1;
-      if (nextIdx >= STEPS.length) setPhase("summary");
-      return nextIdx;
-    });
-  }
+  }, [phase, stepIdx, finishStep]);
 
   function handleDone(value, status) { finishStep(step.key, value, status); }
   function handleSkip() { finishStep(step.key, "Omitida por el paciente", "gray"); }
