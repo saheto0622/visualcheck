@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
-import { getRisk, fromDb, VALIDACION_INFO } from "../lib/format";
+import { getRisk, fromDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO } from "../lib/format";
 import { wrap, btnP, btnS, input } from "../lib/styles";
 
 const FORMULA_FIELDS = [
@@ -261,16 +261,22 @@ export default function OptometristPanel({ onExit }) {
             ))}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              { l: "Agudeza visual", v: selected.acuidad },
-              { l: "Astigmatismo",   v: selected.astigmatismo },
-              { l: "Visión de cerca", v: selected.visionCerca },
-            ].filter(x => x.v).map(({ l, v }) => (
-              <div key={l} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{l}</span>
-                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)" }}>{v}</span>
-              </div>
-            ))}
+            {VT_TESTS.filter(t => selected[t.key]).map(({ key, label }) => {
+              const status = selected.vtStatus?.[key] || "gray";
+              const sc = SEMAFORO_INFO[status];
+              return (
+                <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--color-text-secondary)" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: sc.c, flexShrink: 0 }} />
+                    {label}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: sc.c, textAlign: "right", maxWidth: "55%" }}>{selected[key]}</span>
+                </div>
+              );
+            })}
+            {VT_TESTS.every(t => !selected[t.key]) && (
+              <p style={{ fontSize: 12, color: "var(--color-text-tertiary)", margin: 0 }}>Sin pruebas registradas</p>
+            )}
           </div>
         </div>
 

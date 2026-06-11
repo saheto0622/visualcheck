@@ -1,9 +1,10 @@
 ﻿import { useState, useRef, useEffect } from "react";
 import { supabase } from "./lib/supabase";
-import { getRisk, fromDb, toDb, VALIDACION_INFO } from "./lib/format";
+import { getRisk, fromDb, toDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO } from "./lib/format";
 import { wrap, btnP, btnS } from "./lib/styles";
 import OptometristPanel from "./components/OptometristPanel";
 import AdminOptometrists from "./components/AdminOptometrists";
+import VisualTests from "./components/VisualTests";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -41,16 +42,6 @@ const QUESTIONS = [
 
 const MAX_Q = QUESTIONS.reduce((s, q) => s + Math.max(...q.weights), 0);
 const L_GUIDE = { cx: 0.35, cy: 0.37, rx: 0.10, ry: 0.06 };
-
-const ACUITY_LEVELS = [
-  { size: 72, label: "20/200", meaning: "Muy baja" },
-  { size: 48, label: "20/100", meaning: "Baja" },
-  { size: 28, label: "20/40",  meaning: "Moderada" },
-  { size: 16, label: "20/20",  meaning: "Normal" },
-];
-const E_DIRS = ["→", "←", "↑", "↓"];
-const DIR_LABELS = { "→": "Derecha →", "←": "← Izquierda", "↑": "↑ Arriba", "↓": "Abajo ↓" };
-const DIR_ROTATIONS = { "→": "rotate(0deg)", "←": "rotate(180deg)", "↑": "rotate(-90deg)", "↓": "rotate(90deg)" };
 const R_GUIDE = { cx: 0.65, cy: 0.37, rx: 0.10, ry: 0.06 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -93,10 +84,7 @@ export default function VisualCheck() {
   const [optometristas, setOptometristas] = useState([]);
   const [pdfLoading,   setPdfLoading]   = useState(false);
   // Visual tests states
-  const [vtPhase,    setVtPhase]    = useState("intro"); // intro|acuity|astigmatism|near|summary
-  const [acuityLevel, setAcuityLevel] = useState(0);
-  const [acuityDir,   setAcuityDir]   = useState("→");
-  const [vtResults,   setVtResults]   = useState({ acuity: null, astigmatism: null, near: null });
+  const [vtResults,   setVtResults]   = useState({});
   const [sheetsUrl,    setSheetsUrl]    = useState("");
   const [sheetsSaved,  setSheetsSaved]  = useState(false);
   const [sheetsStatus, setSheetsStatus] = useState("");
@@ -223,7 +211,8 @@ export default function VisualCheck() {
             role: "user",
             content: `Eres asistente de salud visual preventiva. Esta herramienta NO emite diagnósticos médicos.
 
-Análisis de señales externas del ojo: enrojecimiento izquierdo ${r.leftRed}/100, enrojecimiento derecho ${r.rightRed}/100, asimetría ${r.asym}/100, síntomas cuestionario ${r.qScore}/100, puntuación general ${r.overall}/100. Pruebas de agudeza visual: acuidad ${vtResults.acuity || "no realizada"}, astigmatismo: ${vtResults.astigmatism || "no evaluado"}, visión de cerca: ${vtResults.near || "no evaluada"}.
+Análisis de señales externas del ojo: enrojecimiento izquierdo ${r.leftRed}/100, enrojecimiento derecho ${r.rightRed}/100, asimetría ${r.asym}/100, síntomas cuestionario ${r.qScore}/100, puntuación general ${r.overall}/100.
+Batería de 13 pruebas visuales: ${VT_TESTS.map(t => `${t.label}: ${vtResults[t.key] || "no realizada"}`).join("; ")}.
 Cuestionario respondido: ${summary}
 
 Escribe exactamente 3 párrafos muy breves (máximo 2 oraciones c/u) en español:
@@ -334,7 +323,40 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       y += 2;
       doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
 
+      // ── Pruebas visuales (13) ─────────────────────────────────────────────
+      const vtRows = VT_TESTS.filter(t => vtResults[t.key]);
+      if (vtRows.length) {
+        if (y > 230) { doc.addPage(); y = 20; }
+        doc.setFontSize(11); doc.setFont("helvetica","bold");
+        doc.setTextColor(15,15,35);
+        doc.text("Batería de 13 pruebas visuales", M, y); y += 8;
+
+        const SEM_RGB = {
+          green:  [42,100,18],
+          yellow: [169,104,16],
+          red:    [200,59,58],
+          gray:   [145,145,168],
+        };
+        vtRows.forEach(({ key, label }) => {
+          if (y > 278) { doc.addPage(); y = 20; }
+          const status = vtResults.vtStatus?.[key] || "gray";
+          doc.setFillColor(...(SEM_RGB[status] || SEM_RGB.gray));
+          doc.circle(M + 1.2, y - 1.2, 1.2, "F");
+          doc.setFontSize(9); doc.setFont("helvetica","normal");
+          doc.setTextColor(75,75,88);
+          doc.text(label, M + 6, y);
+          doc.setFontSize(8.5); doc.setFont("helvetica","bold");
+          doc.setTextColor(...(SEM_RGB[status] || SEM_RGB.gray));
+          const valText = doc.splitTextToSize(String(vtResults[key]), CW - 80);
+          doc.text(valText, W - M, y, { align: "right" });
+          y += 6 * Math.max(1, valText.length);
+        });
+        y += 4;
+        doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
+      }
+
       // ── Recomendación ────────────────────────────────────────────────────
+      if (y > 260) { doc.addPage(); y = 20; }
       doc.setFontSize(11); doc.setFont("helvetica","bold");
       doc.setTextColor(15,15,35);
       doc.text("Recomendación", M, y); y += 8;
@@ -379,10 +401,8 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       asym:      res.asym,
       qScore:    res.qScore,
       riesgo:    getRisk(res.leftRed, res.rightRed, res.asym, res.qScore).label,
-      acuidad:   vtResults.acuity || "no realizada",
-      astigmatismo: vtResults.astigmatism || "no evaluado",
-      visionCerca: vtResults.near || "no evaluada",
       estado:    "pendiente",
+      ...vtResults,
     };
     try {
       await supabase.from("evaluaciones").insert(toDb(record));
@@ -483,41 +503,13 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     URL.revokeObjectURL(url);
   }
 
-  function handleAcuity(chosen) {
-    const correct = chosen === acuityDir;
-    if (!correct) {
-      const best = acuityLevel > 0 ? ACUITY_LEVELS[acuityLevel - 1].label : "< 20/200";
-      setVtResults(prev => ({ ...prev, acuity: best }));
-      setVtPhase("astigmatism");
-    } else if (acuityLevel >= ACUITY_LEVELS.length - 1) {
-      setVtResults(prev => ({ ...prev, acuity: "20/20" }));
-      setVtPhase("astigmatism");
-    } else {
-      setAcuityLevel(prev => prev + 1);
-      setAcuityDir(E_DIRS[Math.floor(Math.random() * 4)]);
-    }
-  }
-
-  function handleAstig(result) {
-    setVtResults(prev => ({
-      ...prev,
-      astigmatism: result === "equal" ? "Sin señales detectadas" : "Posibles señales de astigmatismo"
-    }));
-    setVtPhase("near");
-  }
-
-  function handleNear(level) {
-    const nearMap = {
-      large: "Dificultad significativa de cerca",
-      medium: "Dificultad leve de cerca",
-      small: "Visión de cerca normal"
-    };
-    setVtResults(prev => ({ ...prev, near: nearMap[level] }));
-    setVtPhase("summary");
+  function handleVtFinish(vtRes) {
+    setVtResults(vtRes);
+    setScreen("camera");
   }
 
   function reset() {
-    setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setFiltroValidacion("todos"); setVtPhase("intro"); setAcuityLevel(0); setAcuityDir("→"); setVtResults({ acuity: null, astigmatism: null, near: null });
+    setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setFiltroValidacion("todos"); setVtResults({});
   }
 
   // ── Welcome ────────────────────────────────────────────────────────────────
@@ -639,135 +631,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
   // ── Visual Tests ──────────────────────────────────────────────────────────────
   if (screen === "visual_tests") {
-    // INTRO
-    if (vtPhase === "intro") return (
-      <div style={wrap}>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px", fontWeight: 500, letterSpacing: ".06em" }}>PRUEBAS VISUALES</p>
-        <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>Evaluemos tu visión</h2>
-        <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "0 0 1.5rem", lineHeight: 1.6 }}>Haremos 3 pruebas rápidas antes de la foto. Solo toma 2 minutos.</p>
-        {[
-          ["👁️", "Agudeza visual", "¿Qué tan nítido ves de lejos?"],
-          ["🎯", "Astigmatismo", "Detección de irregularidades visuales"],
-          ["📖", "Visión de cerca", "¿Cómo ves al leer o usar el celular?"],
-        ].map(([icon, title, desc]) => (
-          <div key={title} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "10px 0", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
-            <span style={{ fontSize: 22 }}>{icon}</span>
-            <div>
-              <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 2px" }}>{title}</p>
-              <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: 0 }}>{desc}</p>
-            </div>
-          </div>
-        ))}
-        <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "10px 12px", margin: "1.25rem 0", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-          📏 Sostén el celular a la distancia de tu brazo (~50cm). Busca buena iluminación.
-        </div>
-        <button style={btnP} onClick={() => { setAcuityDir(E_DIRS[Math.floor(Math.random()*4)]); setVtPhase("acuity"); }}>
-          Comenzar pruebas →
-        </button>
-      </div>
-    );
-
-    // ACUITY TEST
-    if (vtPhase === "acuity") return (
-      <div style={wrap}>
-        <div style={{ height: 3, background: "var(--color-border-tertiary)", borderRadius: 2, marginBottom: "1.5rem", overflow: "hidden" }}>
-          <div style={{ height: 3, width: `${(acuityLevel / ACUITY_LEVELS.length) * 100}%`, background: "var(--color-text-info)", borderRadius: 2, transition: "width .3s" }} />
-        </div>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 4px" }}>Prueba 1 — Agudeza visual · Nivel {acuityLevel + 1} de {ACUITY_LEVELS.length}</p>
-        <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 1.5rem" }}>¿Hacia dónde apuntan las "patas" de la E?</p>
-        <div style={{ textAlign: "center", padding: "1.5rem 0", minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: ACUITY_LEVELS[acuityLevel].size, fontWeight: 700, color: "var(--color-text-primary)", display: "inline-block", transform: DIR_ROTATIONS[acuityDir], fontFamily: "serif", lineHeight: 1, userSelect: "none" }}>E</span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: "1rem" }}>
-          {Object.entries(DIR_LABELS).map(([dir, label]) => (
-            <button key={dir} onClick={() => handleAcuity(dir)}
-              style={{ padding: "14px", fontSize: 16, border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", cursor: "pointer" }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-
-    // ASTIGMATISM TEST
-    if (vtPhase === "astigmatism") return (
-      <div style={wrap}>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 4px" }}>Prueba 2 — Astigmatismo</p>
-        <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>Mira el centro del diagrama fijamente.</p>
-        <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "0 0 1.25rem", lineHeight: 1.5 }}>¿Alguna línea se ve más oscura, borrosa o diferente al resto?</p>
-        <div style={{ display: "flex", justifyContent: "center", margin: "1rem 0 1.5rem" }}>
-          <svg width="200" height="200" viewBox="0 0 200 200">
-            {[0,15,30,45,60,75,90,105,120,135,150,165].map(angle => {
-              const r = angle * Math.PI / 180;
-              return <line key={angle} x1={100 + 88*Math.cos(r)} y1={100 + 88*Math.sin(r)} x2={100 - 88*Math.cos(r)} y2={100 - 88*Math.sin(r)} stroke="currentColor" strokeWidth="1.5" />;
-            })}
-            <circle cx="100" cy="100" r="4" fill="currentColor" />
-            {[0,30,60,90,120,150].map(angle => {
-              const r = angle * Math.PI / 180;
-              const x = 100 + 96*Math.cos(r - Math.PI/2);
-              const y = 100 + 96*Math.sin(r - Math.PI/2);
-              return <text key={"t"+angle} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fill="currentColor" opacity=".5">{angle/30 === 0 ? "12" : angle/30}</text>;
-            })}
-          </svg>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button onClick={() => handleAstig("equal")} style={{ padding: "13px 16px", textAlign: "left", fontSize: 14, border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", cursor: "pointer" }}>
-            ✓ No, todas las líneas se ven igual
-          </button>
-          <button onClick={() => handleAstig("different")} style={{ padding: "13px 16px", textAlign: "left", fontSize: 14, border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", cursor: "pointer" }}>
-            ⚠ Sí, algunas líneas se ven más oscuras o diferentes
-          </button>
-        </div>
-      </div>
-    );
-
-    // NEAR VISION TEST
-    if (vtPhase === "near") return (
-      <div style={wrap}>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 4px" }}>Prueba 3 — Visión de cerca</p>
-        <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>Mantén el celular en tu posición normal de lectura.</p>
-        <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "0 0 1.25rem" }}>¿Cuál es el texto más pequeño que puedes leer con claridad?</p>
-        {[
-          { level: "large",  size: 18, label: "Texto grande" },
-          { level: "medium", size: 13, label: "Texto mediano" },
-          { level: "small",  size: 9,  label: "Texto pequeño" },
-        ].map(({ level, size, label }) => (
-          <button key={level} onClick={() => handleNear(level)}
-            style={{ width: "100%", padding: "14px 16px", textAlign: "left", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)", cursor: "pointer", marginBottom: 8 }}>
-            <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 4px", fontWeight: 500 }}>{label}</p>
-            <p style={{ fontSize: size, color: "var(--color-text-primary)", margin: 0, lineHeight: 1.4 }}>
-              El cuidado visual es fundamental para tu calidad de vida diaria.
-            </p>
-          </button>
-        ))}
-      </div>
-    );
-
-    // SUMMARY
-    if (vtPhase === "summary") return (
-      <div style={wrap}>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px", fontWeight: 500, letterSpacing: ".06em" }}>RESULTADOS VISUALES</p>
-        <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 1.25rem" }}>Tus pruebas visuales</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: "1.5rem" }}>
-          {[
-            { label: "Agudeza visual (lejos)", value: vtResults.acuity || "—", 
-              alert: vtResults.acuity && vtResults.acuity !== "20/20" && vtResults.acuity !== "20/40" },
-            { label: "Astigmatismo", value: vtResults.astigmatism || "—",
-              alert: vtResults.astigmatism?.includes("Posibles") },
-            { label: "Visión de cerca", value: vtResults.near || "—",
-              alert: vtResults.near?.includes("Dificultad") },
-          ].map(({ label, value, alert }) => (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-md)", background: "var(--color-background-primary)" }}>
-              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{label}</span>
-              <span style={{ fontSize: 13, fontWeight: 500, color: alert ? "var(--color-text-warning)" : "var(--color-text-success)" }}>{value}</span>
-            </div>
-          ))}
-        </div>
-        <button style={btnP} onClick={() => setScreen("camera")}>
-          Continuar con la foto de tus ojos →
-        </button>
-      </div>
-    );
+    return <VisualTests onFinish={handleVtFinish} />;
   }
 
   // ── Camera ─────────────────────────────────────────────────────────────────
@@ -842,20 +706,20 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
           ))}
         </div>
 
-        {vtResults.acuity && (
+        {vtResults.vtStatus && (
           <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: "1.25rem" }}>
-            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>PRUEBAS VISUALES</p>
+            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>PRUEBAS VISUALES (13)</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {[
-                { label: "Agudeza visual", value: vtResults.acuity },
-                { label: "Astigmatismo", value: vtResults.astigmatism },
-                { label: "Visión de cerca", value: vtResults.near },
-              ].filter(x => x.value).map(({ label, value }) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: value.includes("normal") || value === "20/20" || value === "Sin señales" ? "var(--color-text-success)" : "var(--color-text-warning)" }}>{value}</span>
-                </div>
-              ))}
+              {VT_TESTS.filter(t => vtResults[t.key]).map(({ key, label }) => {
+                const status = vtResults.vtStatus?.[key] || "gray";
+                const sc = SEMAFORO_INFO[status];
+                return (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: sc.c, textAlign: "right", maxWidth: "55%" }}>{vtResults[key]}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
