@@ -57,6 +57,7 @@ export default function OptometristPanel({ onExit }) {
   const [rxForm, setRxForm] = useState(emptyRxForm());
   const [savingRx, setSavingRx] = useState(false);
   const [rxMsg, setRxMsg] = useState("");
+  const [zoomedPhoto, setZoomedPhoto] = useState(null);
 
   async function login() {
     const codigo = code.trim();
@@ -290,6 +291,39 @@ export default function OptometristPanel({ onExit }) {
           <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "6px 0 0" }}>{selected.fecha}</p>
         </div>
 
+        <div style={card}>
+          <p style={sectionTitle}>FOTOGRAFÍAS OCULARES</p>
+          {(selected.eyePhotoOdUrl || selected.eyePhotoOiUrl) ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {[
+                  { url: selected.eyePhotoOdUrl, title: "Ojo derecho" },
+                  { url: selected.eyePhotoOiUrl, title: "Ojo izquierdo" },
+                ].map(({ url, title }) => (
+                  <div key={title}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 6px" }}>{title}</p>
+                    {url ? (
+                      <img
+                        src={url}
+                        alt={title}
+                        onClick={() => setZoomedPhoto(url)}
+                        style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", borderRadius: "var(--border-radius-md)", cursor: "pointer", border: "0.5px solid var(--color-border-tertiary)" }}
+                      />
+                    ) : (
+                      <div style={{ width: "100%", aspectRatio: "1 / 1", borderRadius: "var(--border-radius-md)", background: "var(--color-background-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--color-text-tertiary)", textAlign: "center", padding: 8 }}>
+                        No disponible
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "10px 0 0" }}>Capturadas el {selected.fecha}</p>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: "var(--color-text-tertiary)", margin: 0 }}>Fotos no disponibles</p>
+          )}
+        </div>
+
         {(HC_QUESTIONS.some(q => selected[q.key]) || selected.hcUltimaFormula) && (
           <div style={card}>
             <p style={sectionTitle}>HISTORIA CLÍNICA</p>
@@ -496,6 +530,15 @@ export default function OptometristPanel({ onExit }) {
             <i className="ti ti-brand-whatsapp" aria-hidden="true" />
             Notificar al paciente por WhatsApp
           </a>
+        )}
+
+        {zoomedPhoto && (
+          <div
+            onClick={() => setZoomedPhoto(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "1.5rem", cursor: "pointer" }}
+          >
+            <img src={zoomedPhoto} alt="Foto ocular ampliada" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: "var(--border-radius-md)" }} />
+          </div>
         )}
       </div>
     );

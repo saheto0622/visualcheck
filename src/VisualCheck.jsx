@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { supabase } from "./lib/supabase";
 import { getRisk, fromDb, toDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO, HC_QUESTIONS, fallbackText } from "./lib/format";
 import { generateReportPDF } from "./lib/pdf";
@@ -8,6 +8,7 @@ import AdminOptometrists from "./components/AdminOptometrists";
 import VisualTests from "./components/VisualTests";
 import PDMeasurement from "./components/PDMeasurement";
 import PrescriptionEstimate from "./components/PrescriptionEstimate";
+import EyeCapture from "./components/EyeCapture";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -44,8 +45,14 @@ const QUESTIONS = [
 ];
 
 const MAX_Q = QUESTIONS.reduce((s, q) => s + Math.max(...q.weights), 0);
-const L_GUIDE = { cx: 0.35, cy: 0.37, rx: 0.10, ry: 0.06 };
-const R_GUIDE = { cx: 0.65, cy: 0.37, rx: 0.10, ry: 0.06 };
+
+// Sclera sampling regions within a single-eye close-up photo (left/right of the iris)
+const SCLERA_REGIONS = [
+  { cx: 0.28, cy: 0.50, rx: 0.13, ry: 0.12 },
+  { cx: 0.72, cy: 0.50, rx: 0.13, ry: 0.12 },
+];
+const REDNESS_BASELINE = 0.370;
+const REDNESS_SCALE = 750;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function sampleRegion(data, W, H, g) {
@@ -64,6 +71,29 @@ function sampleRegion(data, W, H, g) {
   return { r, redness: r / (r + gv + b + 1) };
 }
 
+// Analyzes a single-eye close-up photo: samples the sclera regions either side
+// of the iris and returns an average brightness + redness ratio.
+function analyzeEyePhoto(dataUrl) {
+  return new Promise((resolve) => {
+    if (!dataUrl) { resolve({ r: 128, redness: REDNESS_BASELINE }); return; }
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const samples = SCLERA_REGIONS.map((g) => sampleRegion(data, canvas.width, canvas.height, g));
+      const r = samples.reduce((s, x) => s + x.r, 0) / samples.length;
+      const redness = samples.reduce((s, x) => s + x.redness, 0) / samples.length;
+      resolve({ r, redness });
+    };
+    img.onerror = () => resolve({ r: 128, redness: REDNESS_BASELINE });
+    img.src = dataUrl;
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function VisualCheck() {
   const [screen,    setScreen]    = useState("welcome");
@@ -72,7 +102,6 @@ export default function VisualCheck() {
   const [result,    setResult]    = useState(null);
   const [aiText,    setAiText]    = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [camError,  setCamError]  = useState(false);
   const [userData,  setUserData]  = useState({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" });
   const [adminPin,     setAdminPin]     = useState("");
   const [evaluaciones, setEvaluaciones] = useState([]);
@@ -106,37 +135,6 @@ export default function VisualCheck() {
   // Prescripción óptica estimada por IA
   const [prescripcion, setPrescripcion] = useState(null);
 
-  const videoRef   = useRef(null);
-  const overlayRef = useRef(null);
-  const captureRef = useRef(null);
-  const streamRef  = useRef(null);
-  const rafRef     = useRef(null);
-
-  useEffect(() => {
-    if (screen !== "camera") return;
-    setCamError(false);
-    (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
-          drawOverlay();
-        }
-      } catch {
-        setCamError(true);
-      }
-    })();
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    };
-  }, [screen]);
-
   useEffect(() => {
     (async () => {
       try {
@@ -148,68 +146,15 @@ export default function VisualCheck() {
     })();
   }, []);
 
-  function drawOverlay() {
-    const canvas = overlayRef.current;
-    const video  = videoRef.current;
-    if (!canvas || !video || !video.clientWidth) {
-      rafRef.current = requestAnimationFrame(drawOverlay);
-      return;
-    }
-    const W = video.clientWidth, H = video.clientHeight;
-    if (canvas.width !== W)  canvas.width  = W;
-    if (canvas.height !== H) canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, W, H);
-    // Dark overlay with face oval cutout
-    ctx.fillStyle = "rgba(0,0,0,0.48)";
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.beginPath();
-    ctx.ellipse(W * 0.5, H * 0.46, W * 0.27, H * 0.42, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalCompositeOperation = "source-over";
-    // Face border
-    ctx.strokeStyle = "rgba(255,255,255,0.7)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(W * 0.5, H * 0.46, W * 0.27, H * 0.42, 0, 0, Math.PI * 2);
-    ctx.stroke();
-    // Eye guides
-    [L_GUIDE, R_GUIDE].forEach((g) => {
-      ctx.strokeStyle = "#5DCAA5";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.ellipse(W * g.cx, H * g.cy, W * g.rx, H * g.ry, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    });
-    rafRef.current = requestAnimationFrame(drawOverlay);
-  }
-
-  function captureAndAnalyze() {
-    const video  = videoRef.current;
-    const canvas = captureRef.current;
-    if (!video || !canvas) return;
-    canvas.width  = video.videoWidth  || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const W = canvas.width, H = canvas.height;
-    const L = sampleRegion(img.data, W, H, L_GUIDE);
-    const R = sampleRegion(img.data, W, H, R_GUIDE);
-    const baseline = 0.370, scale = 750;
-    const leftRed  = Math.round(Math.max(0, Math.min(100, (L.redness - baseline) * scale)));
-    const rightRed = Math.round(Math.max(0, Math.min(100, (R.redness - baseline) * scale)));
-    const asym     = Math.round(Math.min(100, Math.abs(L.r - R.r) * 0.85));
+  async function handleEyesCaptured({ photoOD, photoOI }) {
+    const [od, oi] = await Promise.all([analyzeEyePhoto(photoOD), analyzeEyePhoto(photoOI)]);
+    const rightRed = Math.round(Math.max(0, Math.min(100, (od.redness - REDNESS_BASELINE) * REDNESS_SCALE)));
+    const leftRed  = Math.round(Math.max(0, Math.min(100, (oi.redness - REDNESS_BASELINE) * REDNESS_SCALE)));
+    const asym     = Math.round(Math.min(100, Math.abs(od.r - oi.r) * 0.85));
     const qTotal   = QUESTIONS.reduce((s, q) => s + (q.weights[answers[q.id] ?? 0] || 0), 0);
     const qScore   = Math.round((qTotal / MAX_Q) * 100);
     const overall  = Math.round(Math.max(leftRed, rightRed) * 0.35 + asym * 0.15 + qScore * 0.50);
-    cancelAnimationFrame(rafRef.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    processResult({ leftRed, rightRed, asym, qScore, overall });
+    processResult({ leftRed, rightRed, asym, qScore, overall, eyePhotoOD: photoOD, eyePhotoOI: photoOI });
   }
 
   function runDemo() {
@@ -269,6 +214,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         correo: userData.correo, celular: userData.celular, fecha: result.fecha,
         overall: result.overall, leftRed: result.leftRed, rightRed: result.rightRed,
         asym: result.asym, qScore: result.qScore,
+        eyePhotoOD: result.eyePhotoOD, eyePhotoOI: result.eyePhotoOI,
         ...historia,
         ...vtResults,
         ...(pd || {}),
@@ -282,7 +228,31 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     setPdfLoading(false);
   }
 
+  // Uploads a captured eye photo (data URL) to Supabase Storage and returns its
+  // public URL, or null if storage is unavailable (the flow continues either way).
+  async function uploadEyePhoto(dataUrl, path) {
+    if (!dataUrl) return null;
+    try {
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const { error } = await supabase.storage.from("eye-photos").upload(path, blob, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from("eye-photos").getPublicUrl(path);
+      return data?.publicUrl || null;
+    } catch (e) {
+      console.error("eye photo upload:", e);
+      return null;
+    }
+  }
+
   async function saveEval(res) {
+    const [eyePhotoOdUrl, eyePhotoOiUrl] = await Promise.all([
+      uploadEyePhoto(res.eyePhotoOD, `${res.id}_od.jpg`),
+      uploadEyePhoto(res.eyePhotoOI, `${res.id}_oi.jpg`),
+    ]);
     const record = {
       id: res.id,
       fecha: res.fecha,
@@ -301,6 +271,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       estadoValidacion: "pendiente",
       consentimientoAceptado: consentAccepted,
       consentimientoFecha: consentTimestamp,
+      eyePhotoOdUrl, eyePhotoOiUrl,
       ...historia,
       ...vtResults,
       ...prescripcionFields(),
@@ -786,36 +757,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
   // ── Camera ─────────────────────────────────────────────────────────────────
   if (screen === "camera") return (
-    <div style={wrap}>
-      <h2 style={{ fontSize: 16, fontWeight: 500, margin: "0 0 4px", color: "var(--color-text-primary)" }}>Foto de tus ojos</h2>
-      <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 12px" }}>
-        Centra tu rostro en el óvalo y alinea tus ojos con las guías verdes. Asegúrate de tener buena iluminación frontal.
-      </p>
-      {camError ? (
-        <div style={{ padding: "1.5rem", textAlign: "center", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", background: "var(--color-background-secondary)" }}>
-          <i className="ti ti-eye-off" style={{ fontSize: 36, color: "var(--color-text-tertiary)" }} aria-hidden="true" />
-          <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "12px 0 16px" }}>
-            No se pudo acceder a la cámara. Verifica los permisos del navegador.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <button style={{ ...btnP, fontSize: 13, padding: "10px" }} onClick={() => setScreen("camera")}>Reintentar con cámara</button>
-            <button style={{ ...btnS, fontSize: 13, padding: "10px" }} onClick={runDemo}>Ver demo con datos de muestra →</button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ position: "relative", borderRadius: "var(--border-radius-lg)", overflow: "hidden", background: "#111", marginBottom: 12 }}>
-            <video ref={videoRef} style={{ width: "100%", display: "block", minHeight: 220 }} playsInline muted />
-            <canvas ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
-          </div>
-          <canvas ref={captureRef} style={{ display: "none" }} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <button style={btnP} onClick={captureAndAnalyze}>Capturar y analizar</button>
-            <button style={btnS} onClick={runDemo}>Usar datos de demo</button>
-          </div>
-        </>
-      )}
-    </div>
+    <EyeCapture onComplete={handleEyesCaptured} onDemo={runDemo} />
   );
 
   // ── Analyzing ──────────────────────────────────────────────────────────────

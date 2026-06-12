@@ -124,6 +124,8 @@ export function toDb(r) {
     prescripcion_notas: r.prescripcionNotas ?? null,
     prescripcion_validada: r.prescripcionValidada ?? null,
     prescripcion_ajustada: r.prescripcionAjustada ?? null,
+    eye_photo_od_url: r.eyePhotoOdUrl ?? null,
+    eye_photo_oi_url: r.eyePhotoOiUrl ?? null,
   };
   VT_TESTS.forEach(({ key, db }) => { row[db] = r[key] ?? null; });
   return row;
@@ -165,6 +167,8 @@ export function fromDb(row) {
     prescripcionNotas: row.prescripcion_notas,
     prescripcionValidada: row.prescripcion_validada,
     prescripcionAjustada: row.prescripcion_ajustada,
+    eyePhotoOdUrl: row.eye_photo_od_url,
+    eyePhotoOiUrl: row.eye_photo_oi_url,
   };
   VT_TESTS.forEach(({ key, db }) => { out[key] = row[db]; });
   return out;

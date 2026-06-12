@@ -1,5 +1,35 @@
 import { VT_TESTS, getRisk, fallbackText } from "./format";
 
+// Resolves an eye photo to a base64 data URL: prefers the in-session base64
+// (eyePhotoOD/eyePhotoOI) and falls back to fetching the stored Supabase URL.
+async function getEyePhotoBase64(record, eye) {
+  const base64 = eye === "od" ? record.eyePhotoOD : record.eyePhotoOI;
+  if (base64) return base64;
+  const url = eye === "od" ? record.eyePhotoOdUrl : record.eyePhotoOiUrl;
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function getImageSize(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ w: 1, h: 1 });
+    img.src = dataUrl;
+  });
+}
+
 // Generates the VisualCheck PDF report for a given record.
 // `record` follows the shape produced by fromDb() / saveEval():
 // nombre, cedula, direccion, correo, celular, fecha, overall, leftRed,
@@ -62,6 +92,47 @@ export async function generateReportPDF(record, aiText) {
   });
   y += half * 9 + 6;
   doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
+
+  // ── Fotografías oculares ────────────────────────────────────────────
+  const [odPhoto, oiPhoto] = await Promise.all([
+    getEyePhotoBase64(record, "od"),
+    getEyePhotoBase64(record, "oi"),
+  ]);
+  if (odPhoto || oiPhoto) {
+    if (y > 230) { doc.addPage(); y = 20; }
+    doc.setFontSize(11); doc.setFont("helvetica","bold");
+    doc.setTextColor(15,15,35);
+    doc.text("Fotografías oculares", M, y); y += 8;
+
+    const PHOTO_W = 60;
+    let maxH = 0;
+    if (odPhoto) {
+      const { w, h } = await getImageSize(odPhoto);
+      const photoH = PHOTO_W * h / w;
+      doc.addImage(odPhoto, "JPEG", M, y, PHOTO_W, photoH);
+      doc.setFontSize(8.5); doc.setFont("helvetica","normal");
+      doc.setTextColor(75,75,88);
+      doc.text("Ojo derecho (OD)", M, y + photoH + 5);
+      maxH = Math.max(maxH, photoH);
+    }
+    if (oiPhoto) {
+      const { w, h } = await getImageSize(oiPhoto);
+      const photoH = PHOTO_W * h / w;
+      const x2 = M + PHOTO_W + 10;
+      doc.addImage(oiPhoto, "JPEG", x2, y, PHOTO_W, photoH);
+      doc.setFontSize(8.5); doc.setFont("helvetica","normal");
+      doc.setTextColor(75,75,88);
+      doc.text("Ojo izquierdo (OI)", x2, y + photoH + 5);
+      maxH = Math.max(maxH, photoH);
+    }
+    y += maxH + 10;
+    const [fechaPart, horaPart] = (record.fecha || "").split(",").map(s => s.trim());
+    doc.setFontSize(8); doc.setFont("helvetica","italic");
+    doc.setTextColor(130,130,142);
+    doc.text(`Capturadas el ${fechaPart || "—"}${horaPart ? ` a las ${horaPart}` : ""}`, M, y); y += 6;
+    y += 4;
+    doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
+  }
 
   // ── Resultados ───────────────────────────────────────────────────────
   doc.setFontSize(11); doc.setFont("helvetica","bold");
