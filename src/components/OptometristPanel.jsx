@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
-import { getRisk, fromDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO } from "../lib/format";
+import { getRisk, fromDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO, HC_QUESTIONS } from "../lib/format";
 import { wrap, btnP, btnS, input } from "../lib/styles";
 
 const FORMULA_FIELDS = [
@@ -106,6 +106,7 @@ export default function OptometristPanel({ onExit }) {
     if (aprobar) {
       updates.estado_validacion = "validada";
       updates.validado_en = new Date().toISOString();
+      updates.optometrista_tarjeta = optometrista.tarjeta_profesional || null;
     } else if (selected.estadoValidacion === "validada") {
       updates.estado_validacion = "en revision";
       updates.validado_en = null;
@@ -119,6 +120,7 @@ export default function OptometristPanel({ onExit }) {
         observacionesOptometra: updates.observaciones_optometra,
         estadoValidacion: updates.estado_validacion ?? selected.estadoValidacion,
         validadoEn: "validado_en" in updates ? updates.validado_en : selected.validadoEn,
+        optometristaTarjeta: "optometrista_tarjeta" in updates ? updates.optometrista_tarjeta : selected.optometristaTarjeta,
       };
       setSelected(updated);
       setCasos(prev => prev.map(c => c.id === updated.id ? updated : c));
@@ -240,6 +242,26 @@ export default function OptometristPanel({ onExit }) {
           <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "6px 0 0" }}>{selected.fecha}</p>
         </div>
 
+        {(HC_QUESTIONS.some(q => selected[q.key]) || selected.hcUltimaFormula) && (
+          <div style={card}>
+            <p style={sectionTitle}>HISTORIA CLÍNICA</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {HC_QUESTIONS.filter(q => selected[q.key]).map(q => (
+                <div key={q.key} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{q.text}</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", textAlign: "right", maxWidth: "55%" }}>{selected[q.key]}</span>
+                </div>
+              ))}
+              {selected.hcUltimaFormula && (
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Última fórmula óptica</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", textAlign: "right", maxWidth: "55%" }}>{selected.hcUltimaFormula}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div style={card}>
           <p style={sectionTitle}>RESULTADOS VISUALES</p>
           <div style={{ marginBottom: 10 }}>
@@ -330,9 +352,18 @@ export default function OptometristPanel({ onExit }) {
         <button style={{ ...btnS, marginBottom: 8, opacity: saving ? 0.6 : 1 }} onClick={() => guardar(false)} disabled={saving}>
           Guardar cambios
         </button>
-        <button style={{ ...btnP, opacity: saving ? 0.6 : 1 }} onClick={() => guardar(true)} disabled={saving}>
+        <button style={{ ...btnP, marginBottom: 8, opacity: saving ? 0.6 : 1 }} onClick={() => guardar(true)} disabled={saving}>
           Aprobar fórmula
         </button>
+        {selected.estadoValidacion === "validada" && selected.celular && (
+          <a
+            href={`https://wa.me/57${selected.celular.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${selected.nombre}, tu evaluación visual en VisualCheck fue validada por nuestro optómetra. Descarga tu reporte en visualcheck-neon.vercel.app`)}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "13px", fontSize: 14, fontWeight: 500, background: "#25D366", color: "#fff", borderRadius: "var(--border-radius-md)", textDecoration: "none", boxSizing: "border-box" }}>
+            <i className="ti ti-brand-whatsapp" aria-hidden="true" />
+            Notificar al paciente por WhatsApp
+          </a>
+        )}
       </div>
     );
   }

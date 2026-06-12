@@ -1,7 +1,8 @@
 ﻿import { useState, useRef, useEffect } from "react";
 import { supabase } from "./lib/supabase";
-import { getRisk, fromDb, toDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO } from "./lib/format";
-import { wrap, btnP, btnS } from "./lib/styles";
+import { getRisk, fromDb, toDb, VALIDACION_INFO, VT_TESTS, SEMAFORO_INFO, HC_QUESTIONS, fallbackText } from "./lib/format";
+import { generateReportPDF } from "./lib/pdf";
+import { wrap, btnP, btnS, input } from "./lib/styles";
 import OptometristPanel from "./components/OptometristPanel";
 import AdminOptometrists from "./components/AdminOptometrists";
 import VisualTests from "./components/VisualTests";
@@ -61,12 +62,6 @@ function sampleRegion(data, W, H, g) {
   return { r, redness: r / (r + gv + b + 1) };
 }
 
-function fallbackText(score) {
-  return score > 45
-    ? "Se detectaron señales que podrían indicar irritación o tensión ocular. Te recomendamos visitar un optómetra para una evaluación completa.\n\nTus respuestas también sugieren síntomas que ameritan revisión profesional. Un especialista tiene los equipos precisos para darte un diagnóstico certero.\n\n¡Tu salud visual es una prioridad! Actuar a tiempo siempre marca la diferencia."
-    : "Tus indicadores están dentro de parámetros normales según esta evaluación preventiva. Aun así, recomendamos un chequeo con un optómetra al menos una vez al año.\n\nMantener controles regulares es la mejor manera de detectar cambios antes de que se vuelvan problemas.\n\n¡Bien por preocuparte por tu salud visual! Un profesional puede confirmarte que todo está en orden.";
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function VisualCheck() {
   const [screen,    setScreen]    = useState("welcome");
@@ -88,6 +83,22 @@ export default function VisualCheck() {
   const [sheetsUrl,    setSheetsUrl]    = useState("");
   const [sheetsSaved,  setSheetsSaved]  = useState(false);
   const [sheetsStatus, setSheetsStatus] = useState("");
+  // Consentimiento informado
+  const [consentAccepted,  setConsentAccepted]  = useState(false);
+  const [consentTimestamp, setConsentTimestamp] = useState(null);
+  // Historia clínica básica
+  const [historia, setHistoria] = useState({
+    hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "",
+    hcCirugiaOcular: "", hcUltimaFormula: "",
+  });
+  // Landing page
+  const [evalCount, setEvalCount] = useState(null);
+  const [faqOpen,   setFaqOpen]   = useState(null);
+  // Patient panel "Mis resultados"
+  const [misCedula,     setMisCedula]     = useState("");
+  const [misResultados, setMisResultados] = useState(null);
+  const [misLoading,    setMisLoading]    = useState(false);
+  const [misError,      setMisError]      = useState("");
 
   const videoRef   = useRef(null);
   const overlayRef = useRef(null);
@@ -119,6 +130,17 @@ export default function VisualCheck() {
       streamRef.current = null;
     };
   }, [screen]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { count } = await supabase.from("evaluaciones").select("*", { count: "exact", head: true });
+        setEvalCount(count ?? 0);
+      } catch {
+        setEvalCount(null);
+      }
+    })();
+  }, []);
 
   function drawOverlay() {
     const canvas = overlayRef.current;
@@ -190,9 +212,10 @@ export default function VisualCheck() {
   }
 
   function processResult(res) {
-    setResult(res);
-    fetchAI(res);
-    saveEval(res);
+    const fullRes = { ...res, fecha: new Date().toLocaleString("es-CO") };
+    setResult(fullRes);
+    fetchAI(fullRes);
+    saveEval(fullRes);
     setScreen("analyzing");
     setTimeout(() => setScreen("results"), 3000);
   }
@@ -235,151 +258,16 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
   async function generatePDF() {
     setPdfLoading(true);
     try {
-      if (!window.jspdf) {
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-          s.onload = res; s.onerror = rej;
-          document.head.appendChild(s);
-        });
-      }
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF("p", "mm", "a4");
-      const W = 210, M = 18, CW = W - 2 * M;
-      let y = 22;
-
-      const risk = getRisk(result.leftRed, result.rightRed, result.asym, result.qScore);
-      const rC = risk.label === "Requiere atención" ? [200,60,58]
-               : risk.label === "Riesgo moderado"   ? [170,105,15]
-               :                                      [45,100,20];
-
-      // ── Header ──────────────────────────────────────────────────────────
-      doc.setFontSize(22); doc.setFont("helvetica","bold");
-      doc.setTextColor(15,15,35);
-      doc.text("VisualCheck", M, y);
-      doc.setFontSize(10); doc.setFont("helvetica","normal");
-      doc.setTextColor(110,110,120);
-      doc.text("Reporte de Evaluación Visual Preventiva", M, y + 8);
-      const hoy = new Date().toLocaleDateString("es-CO",{year:"numeric",month:"long",day:"numeric"});
-      doc.text(hoy, W - M, y + 8, { align:"right" });
-      y += 16;
-      doc.setDrawColor(210,210,218); doc.setLineWidth(0.4);
-      doc.line(M, y, W - M, y); y += 10;
-
-      // ── Datos del paciente ───────────────────────────────────────────────
-      doc.setFontSize(11); doc.setFont("helvetica","bold");
-      doc.setTextColor(15,15,35);
-      doc.text("Datos del paciente", M, y); y += 8;
-
-      const fields = [
-        ["Nombre",    userData.nombre    || "—"],
-        ["Cédula",    userData.cedula    || "—"],
-        ["Celular",   userData.celular   || "—"],
-        ["Correo",    userData.correo    || "—"],
-        ["Dirección", userData.direccion || "—"],
-      ];
-      const half = Math.ceil(fields.length / 2);
-      fields.forEach(([label, val], i) => {
-        const col = i < half ? 0 : 1;
-        const row = i < half ? i : i - half;
-        const x   = M + col * (CW / 2);
-        const yy  = y + row * 9;
-        doc.setFontSize(8.5); doc.setFont("helvetica","normal");
-        doc.setTextColor(130,130,142); doc.text(label, x, yy);
-        doc.setTextColor(25,25,38);    doc.text(val,   x + 24, yy);
-      });
-      y += half * 9 + 6;
-      doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
-
-      // ── Resultados ───────────────────────────────────────────────────────
-      doc.setFontSize(11); doc.setFont("helvetica","bold");
-      doc.setTextColor(15,15,35);
-      doc.text("Resultados del análisis", M, y);
-      doc.setFontSize(10); doc.setFont("helvetica","bold");
-      doc.setTextColor(...rC);
-      doc.text(`● ${risk.label}  ·  Puntuación ${result.overall}/100`, M + 58, y);
-      y += 10;
-
-      const scores = [
-        ["Enrojecimiento ojo izquierdo", result.leftRed],
-        ["Enrojecimiento ojo derecho",   result.rightRed],
-        ["Asimetría ocular",             result.asym],
-        ["Síntomas reportados",          result.qScore],
-      ];
-      const BAR_X = M + 58, BAR_W = CW - 58;
-      scores.forEach(([label, val]) => {
-        doc.setFontSize(9); doc.setFont("helvetica","normal");
-        doc.setTextColor(75,75,88);
-        doc.text(label, M, y + 3.5);
-        doc.setTextColor(140,140,152);
-        doc.text(`${val}/100`, BAR_X - 3, y + 3.5, { align:"right" });
-        doc.setFillColor(225,225,232);
-        doc.roundedRect(BAR_X, y, BAR_W, 5.5, 1, 1, "F");
-        const bC = val > 55 ? [210,65,64] : val > 22 ? [186,117,23] : [59,109,17];
-        doc.setFillColor(...bC);
-        if (val > 0) doc.roundedRect(BAR_X, y, BAR_W * (val/100), 5.5, 1, 1, "F");
-        y += 13;
-      });
-      y += 2;
-      doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
-
-      // ── Pruebas visuales (13) ─────────────────────────────────────────────
-      const vtRows = VT_TESTS.filter(t => vtResults[t.key]);
-      if (vtRows.length) {
-        if (y > 230) { doc.addPage(); y = 20; }
-        doc.setFontSize(11); doc.setFont("helvetica","bold");
-        doc.setTextColor(15,15,35);
-        doc.text("Batería de 13 pruebas visuales", M, y); y += 8;
-
-        const SEM_RGB = {
-          green:  [42,100,18],
-          yellow: [169,104,16],
-          red:    [200,59,58],
-          gray:   [145,145,168],
-        };
-        vtRows.forEach(({ key, label }) => {
-          if (y > 278) { doc.addPage(); y = 20; }
-          const status = vtResults.vtStatus?.[key] || "gray";
-          doc.setFillColor(...(SEM_RGB[status] || SEM_RGB.gray));
-          doc.circle(M + 1.2, y - 1.2, 1.2, "F");
-          doc.setFontSize(9); doc.setFont("helvetica","normal");
-          doc.setTextColor(75,75,88);
-          doc.text(label, M + 6, y);
-          doc.setFontSize(8.5); doc.setFont("helvetica","bold");
-          doc.setTextColor(...(SEM_RGB[status] || SEM_RGB.gray));
-          const valText = doc.splitTextToSize(String(vtResults[key]), CW - 80);
-          doc.text(valText, W - M, y, { align: "right" });
-          y += 6 * Math.max(1, valText.length);
-        });
-        y += 4;
-        doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
-      }
-
-      // ── Recomendación ────────────────────────────────────────────────────
-      if (y > 260) { doc.addPage(); y = 20; }
-      doc.setFontSize(11); doc.setFont("helvetica","bold");
-      doc.setTextColor(15,15,35);
-      doc.text("Recomendación", M, y); y += 8;
-      doc.setFontSize(9); doc.setFont("helvetica","normal");
-      doc.setTextColor(45,45,58);
-      const recText = aiText || fallbackText(result.overall);
-      const lines = doc.splitTextToSize(recText.replace(/\n\n/g," | "), CW);
-      lines.forEach(line => {
-        if (y > 268) { doc.addPage(); y = 20; }
-        if (line.trim() === "\n") { y += 3; return; }
-        doc.text(line, M, y); y += 5.5;
-      });
-
-      // ── Footer ───────────────────────────────────────────────────────────
-      const fY = 282;
-      doc.setDrawColor(210,210,218); doc.setLineWidth(0.4); doc.line(M, fY, W - M, fY);
-      doc.setFontSize(7.5); doc.setTextColor(155,155,165);
-      doc.text("Esta evaluación es una herramienta de detección preventiva. No constituye diagnóstico médico ni reemplaza la consulta profesional.", M, fY + 5, { maxWidth: CW });
-      doc.setFontSize(8); doc.setTextColor(90,90,105);
-      doc.text("VisualCheck  ·  +57 314 689 4654  ·  Medellín, Colombia", W/2, fY + 11, { align:"center" });
-
-      const fname = `VisualCheck_${(userData.nombre||"reporte").replace(/\s+/g,"_")}.pdf`;
-      doc.save(fname);
+      const record = {
+        nombre: userData.nombre, cedula: userData.cedula, direccion: userData.direccion,
+        correo: userData.correo, celular: userData.celular, fecha: result.fecha,
+        overall: result.overall, leftRed: result.leftRed, rightRed: result.rightRed,
+        asym: result.asym, qScore: result.qScore,
+        ...historia,
+        ...vtResults,
+        estadoValidacion: "pendiente",
+      };
+      await generateReportPDF(record, aiText || fallbackText(result.overall));
     } catch(e) {
       console.error("PDF error:", e);
     }
@@ -389,7 +277,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
   async function saveEval(res) {
     const record = {
       id: Date.now(),
-      fecha: new Date().toLocaleString("es-CO"),
+      fecha: res.fecha,
       nombre:    userData.nombre,
       cedula:    userData.cedula,
       direccion: userData.direccion,
@@ -402,6 +290,10 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       qScore:    res.qScore,
       riesgo:    getRisk(res.leftRed, res.rightRed, res.asym, res.qScore).label,
       estado:    "pendiente",
+      estadoValidacion: "pendiente",
+      consentimientoAceptado: consentAccepted,
+      consentimientoFecha: consentTimestamp,
+      ...historia,
       ...vtResults,
     };
     try {
@@ -409,6 +301,37 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     } catch(e) { console.error("supabase:", e); }
     const sheetsUrlLocal = localStorage.getItem("vc_sheets_url");
     if (sheetsUrlLocal) sendToSheets(record, sheetsUrlLocal);
+  }
+
+  async function buscarMisResultados() {
+    const cedula = misCedula.trim();
+    if (!cedula) return;
+    setMisLoading(true);
+    setMisError("");
+    setMisResultados(null);
+    try {
+      const { data, error } = await supabase
+        .from("evaluaciones")
+        .select("*")
+        .eq("cedula", cedula)
+        .order("id", { ascending: false });
+      if (error) throw error;
+      setMisResultados((data || []).map(fromDb));
+      if (!data || data.length === 0) setMisError("No encontramos evaluaciones con esa cédula.");
+    } catch {
+      setMisError("No se pudo buscar tu historial. Intenta de nuevo.");
+    }
+    setMisLoading(false);
+  }
+
+  async function descargarPDFResultado(ev) {
+    setPdfLoading(true);
+    try {
+      await generateReportPDF(ev, null);
+    } catch(e) {
+      console.error("PDF error:", e);
+    }
+    setPdfLoading(false);
   }
 
   async function loadEvals() {
@@ -510,6 +433,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
   function reset() {
     setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setFiltroValidacion("todos"); setVtResults({});
+    setConsentAccepted(false); setConsentTimestamp(null);
+    setHistoria({ hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "", hcCirugiaOcular: "", hcUltimaFormula: "" });
+    setMisCedula(""); setMisResultados(null); setMisError("");
   }
 
   // ── Welcome ────────────────────────────────────────────────────────────────
@@ -537,13 +463,57 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", textAlign: "left", margin: "0 0 2rem", lineHeight: 1.65 }}>
           En pocos minutos evaluaremos señales visuales mediante un cuestionario y tu cámara frontal. Recibirás una recomendación personalizada generada por IA.
         </p>
+        {evalCount !== null && evalCount > 0 && (
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: "1.5rem" }}>
+            <span style={{ fontWeight: 600, color: "#fff" }}>{evalCount.toLocaleString("es-CO")}</span> evaluaciones realizadas hasta ahora
+          </div>
+        )}
         <button
           style={{ width: "100%", padding: "14px", fontSize: 15, fontWeight: 500, cursor: "pointer", background: "rgba(255,255,255,0.96)", color: "#111", border: "none", borderRadius: "var(--border-radius-md)" }}
-          onClick={() => setScreen("questionnaire")}>
+          onClick={() => setScreen("consent")}>
           Iniciar evaluación →
         </button>
         <p
-          style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", marginTop: "1.75rem", cursor: "pointer", userSelect: "none", textAlign: "center" }}
+          style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: "1rem", cursor: "pointer", userSelect: "none", textAlign: "center" }}
+          onClick={() => setScreen("mis_resultados")}>
+          ◆ Mis resultados
+        </p>
+
+        {/* FAQ */}
+        <div style={{ marginTop: "2.5rem", textAlign: "left" }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: "#fff", margin: "0 0 0.75rem" }}>Preguntas frecuentes</p>
+          {[
+            ["¿Es gratuito?", "Sí, VisualCheck es completamente gratuito para los pacientes."],
+            ["¿Reemplaza al optómetra?", "No. Es una herramienta de detección preventiva y no sustituye una consulta con un optómetra certificado."],
+            ["¿Qué precisión tienen las pruebas?", "Las pruebas son orientativas y dependen de la iluminación y tu dispositivo; no tienen la precisión de un examen clínico profesional."],
+            ["¿Cómo se protegen mis datos?", "Tus datos se almacenan de forma segura y solo son accesibles por el equipo de VisualCheck y los optómetras autorizados, conforme a la Ley 1581 de 2012."],
+            ["¿Cuánto tarda mi resultado?", "El análisis se genera en pocos segundos al finalizar la evaluación."],
+            ["¿Funciona en cualquier celular?", "Funciona en cualquier celular con cámara frontal y un navegador moderno (Chrome, Safari, etc.)."],
+          ].map(([q, a], i) => (
+            <div key={i} style={{ borderBottom: "0.5px solid rgba(255,255,255,0.12)" }}>
+              <button
+                onClick={() => setFaqOpen(faqOpen === i ? null : i)}
+                style={{ width: "100%", textAlign: "left", padding: "10px 0", background: "transparent", border: "none", color: "#fff", fontSize: 12.5, fontWeight: 500, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                {q}
+                <span style={{ color: "rgba(255,255,255,0.4)" }}>{faqOpen === i ? "−" : "+"}</span>
+              </button>
+              {faqOpen === i && (
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", margin: "0 0 10px", lineHeight: 1.6 }}>{a}</p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: "2rem", display: "flex", justifyContent: "center", gap: 14 }}>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", cursor: "pointer", userSelect: "none" }} onClick={() => setScreen("privacy")}>
+            Política de privacidad
+          </span>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", cursor: "pointer", userSelect: "none" }} onClick={() => setScreen("terms")}>
+            Términos y condiciones
+          </span>
+        </div>
+        <p
+          style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", marginTop: "1.25rem", cursor: "pointer", userSelect: "none", textAlign: "center" }}
           onClick={() => setScreen("admin_pin")}>
           ◆ Admin
         </p>
@@ -556,7 +526,75 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     </div>
   );
 
-  // ── Questionnaire ──────────────────────────────────────────────────────────
+  // ── Consentimiento informado ───────────────────────────────────────────────
+  if (screen === "consent") {
+    return (
+      <div style={wrap}>
+        <div style={{ height: 3, background: "var(--color-border-tertiary)", borderRadius: 2, marginBottom: "1.75rem", overflow: "hidden" }}>
+          <div style={{ height: 3, width: "25%", background: "var(--color-text-info)", borderRadius: 2 }} />
+        </div>
+        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px" }}>Paso 1 de 4</p>
+        <p style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Consentimiento informado</p>
+        <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 1.25rem", lineHeight: 1.6 }}>
+          Antes de continuar, por favor lee y acepta lo siguiente:
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: "1.5rem" }}>
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px" }}>
+            <p style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 6px" }}>¿Qué datos recopilamos?</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
+              Tu nombre, cédula, dirección, correo y celular; tus respuestas al cuestionario y a la batería de pruebas visuales; y una foto de tus ojos tomada con tu cámara.
+            </p>
+          </div>
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px" }}>
+            <p style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 6px" }}>¿Para qué se usan?</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
+              Para realizar una evaluación preventiva de tu salud visual y, si lo solicitas o un optómetra lo determina, para que un profesional valide los resultados.
+            </p>
+          </div>
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px" }}>
+            <p style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 6px" }}>¿Quién tiene acceso?</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
+              Únicamente el equipo de VisualCheck y los optómetras autorizados que validen tu evaluación.
+            </p>
+          </div>
+          <div style={{ border: "0.5px solid var(--color-border-warning, var(--color-border-tertiary))", borderRadius: "var(--border-radius-lg)", padding: "14px", background: "var(--color-background-warning)" }}>
+            <p style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-warning)", margin: "0 0 6px" }}>Importante</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-warning)", margin: 0, lineHeight: 1.6 }}>
+              VisualCheck NO es un diagnóstico médico. Es únicamente una herramienta de detección preventiva y no reemplaza la consulta con un profesional de la salud visual.
+            </p>
+          </div>
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px" }}>
+            <p style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 6px" }}>Tus derechos (Ley 1581 de 2012)</p>
+            <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: 0, lineHeight: 1.6 }}>
+              Como titular de tus datos, tienes derecho a conocer, actualizar, rectificar y suprimir tu información en cualquier momento, escribiendo a <strong>visualcheck@gmail.com</strong>.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ marginTop: "2rem", display: "flex", justifyContent: "center", gap: 14, marginBottom: "1rem" }}>
+          <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", cursor: "pointer", userSelect: "none", textDecoration: "underline" }} onClick={() => setScreen("privacy")}>
+            Política de privacidad
+          </span>
+          <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", cursor: "pointer", userSelect: "none", textDecoration: "underline" }} onClick={() => setScreen("terms")}>
+            Términos y condiciones
+          </span>
+        </div>
+
+        <button
+          style={{ ...btnP, marginBottom: 8 }}
+          onClick={() => {
+            setConsentAccepted(true);
+            setConsentTimestamp(new Date().toISOString());
+            setScreen("registro");
+          }}>
+          Acepto y continúo
+        </button>
+        <button style={btnS} onClick={() => setScreen("welcome")}>No acepto</button>
+      </div>
+    );
+  }
+
   // ── Registro de datos ─────────────────────────────────────────────────────
   if (screen === "registro") {
     const fields = [
@@ -570,9 +608,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     return (
       <div style={wrap}>
         <div style={{ height: 3, background: "var(--color-border-tertiary)", borderRadius: 2, marginBottom: "1.75rem", overflow: "hidden" }}>
-          <div style={{ height: 3, width: "0%", background: "var(--color-text-info)", borderRadius: 2 }} />
+          <div style={{ height: 3, width: "50%", background: "var(--color-text-info)", borderRadius: 2 }} />
         </div>
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px" }}>Paso 1 de 3</p>
+        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px" }}>Paso 2 de 4</p>
         <p style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Tus datos</p>
         <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 1.5rem" }}>Los campos marcados con * son obligatorios</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: "1.25rem" }}>
@@ -592,6 +630,63 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         <p style={{ fontSize: 10, color: "var(--color-text-tertiary)", margin: "0 0 1.25rem", lineHeight: 1.5 }}>
           Tus datos son confidenciales y se usan únicamente para hacer seguimiento a tu evaluación visual.
         </p>
+        <button
+          style={{ ...btnP, opacity: isValid ? 1 : 0.45, cursor: isValid ? "pointer" : "not-allowed" }}
+          disabled={!isValid}
+          onClick={() => setScreen("historia_clinica")}>
+          Continuar →
+        </button>
+      </div>
+    );
+  }
+
+  // ── Historia clínica básica ────────────────────────────────────────────────
+  if (screen === "historia_clinica") {
+    const isValid = HC_QUESTIONS.every(q => historia[q.key]);
+    return (
+      <div style={wrap}>
+        <div style={{ height: 3, background: "var(--color-border-tertiary)", borderRadius: 2, marginBottom: "1.75rem", overflow: "hidden" }}>
+          <div style={{ height: 3, width: "75%", background: "var(--color-text-info)", borderRadius: 2 }} />
+        </div>
+        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px" }}>Paso 3 de 4</p>
+        <p style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Historia clínica básica</p>
+        <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 1.5rem" }}>
+          Esta información ayuda al optómetra a interpretar mejor tus resultados.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: "1.25rem" }}>
+          {HC_QUESTIONS.map(q => (
+            <div key={q.key}>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px", lineHeight: 1.45 }}>{q.text}</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {q.options.map(opt => (
+                  <button key={opt}
+                    onClick={() => setHistoria(prev => ({ ...prev, [q.key]: opt }))}
+                    style={{
+                      padding: "10px 14px", textAlign: "left", fontSize: 13, borderRadius: "var(--border-radius-md)", cursor: "pointer",
+                      border: historia[q.key] === opt ? "1px solid var(--color-text-info)" : "0.5px solid var(--color-border-secondary)",
+                      background: historia[q.key] === opt ? "var(--color-background-info)" : "var(--color-background-primary)",
+                      color: historia[q.key] === opt ? "var(--color-text-info)" : "var(--color-text-primary)",
+                      fontWeight: historia[q.key] === opt ? 500 : 400,
+                    }}>
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", display: "block", marginBottom: 8 }}>
+              ¿Cuál fue tu última fórmula óptica? <span style={{ fontWeight: 400, color: "var(--color-text-tertiary)" }}>(opcional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Ej: OD -1.00, OI -1.25"
+              value={historia.hcUltimaFormula}
+              onChange={e => setHistoria(prev => ({ ...prev, hcUltimaFormula: e.target.value }))}
+              style={input}
+            />
+          </div>
+        </div>
         <button
           style={{ ...btnP, opacity: isValid ? 1 : 0.45, cursor: isValid ? "pointer" : "not-allowed" }}
           disabled={!isValid}
@@ -686,6 +781,14 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     const risk = getRisk(result.leftRed, result.rightRed, result.asym, result.qScore);
     return (
       <div style={wrap}>
+        <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: "1.25rem" }}>
+          <p style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>{userData.nombre || "—"}</p>
+          <div style={{ display: "flex", gap: 6, fontSize: 12, color: "var(--color-text-secondary)", flexWrap: "wrap" }}>
+            {userData.cedula && <span>CC {userData.cedula}</span>}
+            <span>· {result.fecha}</span>
+          </div>
+        </div>
+
         <div style={{ padding: "12px 16px", borderRadius: "var(--border-radius-md)", background: risk.bc, marginBottom: "1.25rem" }}>
           <span style={{ fontSize: 14, fontWeight: 500, color: risk.tc }}>{risk.label} · Puntuación {result.overall}/100</span>
         </div>
@@ -759,6 +862,136 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         <p style={{ fontSize: 10, color: "var(--color-text-tertiary)", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>
           Esta herramienta no emite diagnósticos médicos. Los resultados son orientativos. Consulta siempre con un profesional de la salud visual.
         </p>
+      </div>
+    );
+  }
+
+  // ── Mis resultados (panel del paciente) ──────────────────────────────────
+  if (screen === "mis_resultados") {
+    return (
+      <div style={wrap}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "1.5rem" }}>
+          <button onClick={() => setScreen("welcome")} style={{ ...btnS, width: "auto", padding: "7px 14px", fontSize: 13 }}>← Volver</button>
+          <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>Mis resultados</h2>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--color-text-secondary)", margin: "0 0 1.25rem", lineHeight: 1.6 }}>
+          Ingresa tu número de cédula para ver el historial de tus evaluaciones y descargar tus reportes.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: "1.25rem" }}>
+          <input
+            type="text"
+            placeholder="Número de cédula"
+            value={misCedula}
+            onChange={e => setMisCedula(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") buscarMisResultados(); }}
+            style={{ ...input, flex: 1 }}
+          />
+          <button style={{ ...btnP, width: "auto", padding: "11px 18px" }} onClick={buscarMisResultados} disabled={misLoading}>
+            {misLoading ? "..." : "Buscar"}
+          </button>
+        </div>
+
+        {misError && (
+          <p style={{ fontSize: 12, color: "var(--color-text-danger)", textAlign: "center", margin: "0 0 1rem" }}>{misError}</p>
+        )}
+
+        {misResultados && misResultados.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {misResultados.map(ev => {
+              const rk = getRisk(ev.leftRed, ev.rightRed, ev.asym, ev.qScore);
+              return (
+                <div key={ev.id} style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "12px 14px", background: "var(--color-background-primary)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      <p style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 2px" }}>{ev.fecha}</p>
+                      <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 20, background: rk.bc, color: rk.tc }}>{ev.riesgo} · {ev.overall}/100</span>
+                    </div>
+                    {ev.estadoValidacion === "validada" && (
+                      <span style={{ fontSize: 11, fontWeight: 500, padding: "3px 8px", borderRadius: 20, background: "var(--color-background-success)", color: "var(--color-text-success)", whiteSpace: "nowrap" }}>
+                        Fórmula validada ✓
+                      </span>
+                    )}
+                  </div>
+                  <button style={{ ...btnS, fontSize: 13, padding: "10px" }} onClick={() => descargarPDFResultado(ev)} disabled={pdfLoading}>
+                    <i className="ti ti-file-type-pdf" style={{ marginRight: 6 }} aria-hidden="true" />
+                    {pdfLoading ? "Generando PDF..." : "Descargar reporte PDF"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Política de Privacidad ────────────────────────────────────────────────
+  if (screen === "privacy") {
+    return (
+      <div style={wrap}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "1.5rem" }}>
+          <button onClick={() => setScreen("welcome")} style={{ ...btnS, width: "auto", padding: "7px 14px", fontSize: 13 }}>← Volver</button>
+          <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>Política de Privacidad</h2>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 14 }}>
+          <p>
+            En cumplimiento de la Ley 1581 de 2012 sobre protección de datos personales en Colombia, VisualCheck informa lo siguiente:
+          </p>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Responsable del tratamiento</p>
+            <p style={{ margin: 0 }}>VisualCheck, herramienta de evaluación preventiva de salud visual con sede en Medellín, Colombia.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Datos que recopilamos</p>
+            <p style={{ margin: 0 }}>Nombre, número de cédula, dirección, correo electrónico, celular, respuestas del cuestionario de síntomas, historia clínica básica, resultados de la batería de pruebas visuales y una imagen capturada de tus ojos.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Finalidad del tratamiento</p>
+            <p style={{ margin: 0 }}>Realizar una evaluación preventiva de salud visual, generar un reporte para el paciente, permitir su seguimiento y, cuando corresponda, su validación por un optómetra autorizado.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Derechos del titular</p>
+            <p style={{ margin: 0 }}>Como titular de los datos, tienes derecho a conocer, actualizar, rectificar y suprimir tu información personal, así como a revocar la autorización otorgada para su tratamiento, en cualquier momento.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Contacto</p>
+            <p style={{ margin: 0 }}>Para ejercer tus derechos o realizar consultas sobre el tratamiento de tus datos, escríbenos a <strong>visualcheck@gmail.com</strong>.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Términos y Condiciones ────────────────────────────────────────────────
+  if (screen === "terms") {
+    return (
+      <div style={wrap}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "1.5rem" }}>
+          <button onClick={() => setScreen("welcome")} style={{ ...btnS, width: "auto", padding: "7px 14px", fontSize: 13 }}>← Volver</button>
+          <h2 style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>Términos y Condiciones</h2>
+        </div>
+        <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Descripción del servicio</p>
+            <p style={{ margin: 0 }}>VisualCheck es una herramienta digital de evaluación preventiva de salud visual que combina un cuestionario de síntomas, una historia clínica básica, una batería de pruebas visuales y un análisis de imágenes capturadas con la cámara del dispositivo del usuario.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>No es un dispositivo médico</p>
+            <p style={{ margin: 0 }}>VisualCheck no es un dispositivo médico ni una herramienta de diagnóstico clínico. Los resultados generados son orientativos y tienen fines exclusivamente preventivos e informativos.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Validación profesional requerida</p>
+            <p style={{ margin: 0 }}>Cualquier fórmula óptica o recomendación generada por VisualCheck debe ser revisada y validada por un optómetra certificado antes de tomar decisiones sobre el tratamiento o uso de corrección visual.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Limitación de responsabilidad</p>
+            <p style={{ margin: 0 }}>VisualCheck y su equipo no se hacen responsables por decisiones médicas tomadas con base únicamente en los resultados de esta herramienta, sin la validación de un profesional de la salud visual.</p>
+          </div>
+          <div>
+            <p style={{ fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 4px" }}>Ley aplicable</p>
+            <p style={{ margin: 0 }}>Estos términos se rigen por las leyes de la República de Colombia, incluyendo la Ley 1581 de 2012 sobre protección de datos personales.</p>
+          </div>
+        </div>
       </div>
     );
   }

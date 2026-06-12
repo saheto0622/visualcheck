@@ -33,6 +33,37 @@ export const VALIDACION_INFO = {
   "validada":    { bg: "var(--color-background-success)",   c: "var(--color-text-success)",   label: "Validada" },
 };
 
+// ─── Historia clínica básica (5 preguntas) ─────────────────────────────────────
+export const HC_QUESTIONS = [
+  {
+    key: "hcUsaGafas", db: "hc_usa_gafas",
+    text: "¿Usas gafas o lentes de contacto actualmente?",
+    options: ["Sí - Gafas", "Sí - Lentes de contacto", "No"],
+  },
+  {
+    key: "hcDiabetesHipertension", db: "hc_diabetes_hipertension",
+    text: "¿Tienes diabetes o hipertensión diagnosticada?",
+    options: ["Sí - Diabetes", "Sí - Hipertensión", "Ambas", "No"],
+  },
+  {
+    key: "hcAntecedentesFamiliares", db: "hc_antecedentes_familiares",
+    text: "¿Tienes antecedentes familiares de glaucoma o degeneración macular?",
+    options: ["Sí", "No", "No sé"],
+  },
+  {
+    key: "hcCirugiaOcular", db: "hc_cirugia_ocular",
+    text: "¿Has tenido alguna cirugía ocular?",
+    options: ["Sí", "No"],
+  },
+];
+
+// ─── Fallback AI text ───────────────────────────────────────────────────────────
+export function fallbackText(score) {
+  return score > 45
+    ? "Se detectaron señales que podrían indicar irritación o tensión ocular. Te recomendamos visitar un optómetra para una evaluación completa.\n\nTus respuestas también sugieren síntomas que ameritan revisión profesional. Un especialista tiene los equipos precisos para darte un diagnóstico certero.\n\n¡Tu salud visual es una prioridad! Actuar a tiempo siempre marca la diferencia."
+    : "Tus indicadores están dentro de parámetros normales según esta evaluación preventiva. Aun así, recomendamos un chequeo con un optómetra al menos una vez al año.\n\nMantener controles regulares es la mejor manera de detectar cambios antes de que se vuelvan problemas.\n\n¡Bien por preocuparte por tu salud visual! Un profesional puede confirmarte que todo está en orden.";
+}
+
 // ─── Risk helper ──────────────────────────────────────────────────────────────
 export function getRisk(lR, rR, as, qS) {
   if (lR > 55 || rR > 55 || as > 60 || qS > 65)
@@ -54,6 +85,14 @@ export function toDb(r) {
     esfera_od: r.esferaOd, cilindro_od: r.cilindroOd, eje_od: r.ejeOd, adicion_od: r.adicionOd,
     esfera_oi: r.esferaOi, cilindro_oi: r.cilindroOi, eje_oi: r.ejeOi, adicion_oi: r.adicionOi,
     observaciones_optometra: r.observacionesOptometra, validado_en: r.validadoEn,
+    optometrista_tarjeta: r.optometristaTarjeta,
+    consentimiento_aceptado: r.consentimientoAceptado ?? null,
+    consentimiento_fecha: r.consentimientoFecha ?? null,
+    hc_usa_gafas: r.hcUsaGafas ?? null,
+    hc_diabetes_hipertension: r.hcDiabetesHipertension ?? null,
+    hc_antecedentes_familiares: r.hcAntecedentesFamiliares ?? null,
+    hc_cirugia_ocular: r.hcCirugiaOcular ?? null,
+    hc_ultima_formula: r.hcUltimaFormula ?? null,
     vt_status: r.vtStatus ?? null,
   };
   VT_TESTS.forEach(({ key, db }) => { row[db] = r[key] ?? null; });
@@ -71,6 +110,14 @@ export function fromDb(row) {
     esferaOd: row.esfera_od, cilindroOd: row.cilindro_od, ejeOd: row.eje_od, adicionOd: row.adicion_od,
     esferaOi: row.esfera_oi, cilindroOi: row.cilindro_oi, ejeOi: row.eje_oi, adicionOi: row.adicion_oi,
     observacionesOptometra: row.observaciones_optometra, validadoEn: row.validado_en,
+    optometristaTarjeta: row.optometrista_tarjeta,
+    consentimientoAceptado: row.consentimiento_aceptado,
+    consentimientoFecha: row.consentimiento_fecha,
+    hcUsaGafas: row.hc_usa_gafas,
+    hcDiabetesHipertension: row.hc_diabetes_hipertension,
+    hcAntecedentesFamiliares: row.hc_antecedentes_familiares,
+    hcCirugiaOcular: row.hc_cirugia_ocular,
+    hcUltimaFormula: row.hc_ultima_formula,
     vtStatus: row.vt_status || {},
   };
   VT_TESTS.forEach(({ key, db }) => { out[key] = row[db]; });
