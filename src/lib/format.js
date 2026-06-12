@@ -17,6 +17,8 @@ export const VT_TESTS = [
   { key: "fusionBinocular",     db: "fusion_binocular",      label: "Fusión binocular" },
   { key: "estereopsis",         db: "estereopsis",           label: "Estereopsis básica" },
   { key: "coordinacionBinocular", db: "coordinacion_binocular", label: "Coordinación binocular" },
+  { key: "astigmatismo",        db: "astigmatismo",          label: "Astigmatismo (eje y cilindro)" },
+  { key: "lenteCruzada",        db: "lente_cruzada",         label: "Confirmación del eje (lente cruzada)" },
 ];
 
 export const SEMAFORO_INFO = {
@@ -55,7 +57,19 @@ export const HC_QUESTIONS = [
     text: "¿Has tenido alguna cirugía ocular?",
     options: ["Sí", "No"],
   },
+  {
+    key: "edadRango", db: "edad_rango",
+    text: "¿En qué rango de edad estás?",
+    options: ["Menor de 30", "30-39", "40-49", "50-59", "60 o más"],
+  },
 ];
+
+// ─── Confianza de la prescripción estimada por IA ──────────────────────────────
+export const CONFIANZA_INFO = {
+  alta:  { emoji: "🟢", label: "Alta" },
+  media: { emoji: "🟡", label: "Media" },
+  baja:  { emoji: "🔴", label: "Baja" },
+};
 
 // ─── Fallback AI text ───────────────────────────────────────────────────────────
 export function fallbackText(score) {
@@ -93,11 +107,23 @@ export function toDb(r) {
     hc_antecedentes_familiares: r.hcAntecedentesFamiliares ?? null,
     hc_cirugia_ocular: r.hcCirugiaOcular ?? null,
     hc_ultima_formula: r.hcUltimaFormula ?? null,
+    edad_rango: r.edadRango ?? null,
     pd_binocular: r.pdBinocular ?? null,
     pd_od: r.pdOd ?? null,
     pd_oi: r.pdOi ?? null,
     pd_precision: r.pdPrecision ?? null,
     vt_status: r.vtStatus ?? null,
+    od_esfera: r.odEsfera ?? null,
+    od_cilindro: r.odCilindro ?? null,
+    od_eje: r.odEje ?? null,
+    oi_esfera: r.oiEsfera ?? null,
+    oi_cilindro: r.oiCilindro ?? null,
+    oi_eje: r.oiEje ?? null,
+    adicion: r.adicion ?? null,
+    prescripcion_confianza: r.prescripcionConfianza ?? null,
+    prescripcion_notas: r.prescripcionNotas ?? null,
+    prescripcion_validada: r.prescripcionValidada ?? null,
+    prescripcion_ajustada: r.prescripcionAjustada ?? null,
   };
   VT_TESTS.forEach(({ key, db }) => { row[db] = r[key] ?? null; });
   return row;
@@ -122,11 +148,23 @@ export function fromDb(row) {
     hcAntecedentesFamiliares: row.hc_antecedentes_familiares,
     hcCirugiaOcular: row.hc_cirugia_ocular,
     hcUltimaFormula: row.hc_ultima_formula,
+    edadRango: row.edad_rango,
     pdBinocular: row.pd_binocular,
     pdOd: row.pd_od,
     pdOi: row.pd_oi,
     pdPrecision: row.pd_precision,
     vtStatus: row.vt_status || {},
+    odEsfera: row.od_esfera,
+    odCilindro: row.od_cilindro,
+    odEje: row.od_eje,
+    oiEsfera: row.oi_esfera,
+    oiCilindro: row.oi_cilindro,
+    oiEje: row.oi_eje,
+    adicion: row.adicion,
+    prescripcionConfianza: row.prescripcion_confianza,
+    prescripcionNotas: row.prescripcion_notas,
+    prescripcionValidada: row.prescripcion_validada,
+    prescripcionAjustada: row.prescripcion_ajustada,
   };
   VT_TESTS.forEach(({ key, db }) => { out[key] = row[db]; });
   return out;

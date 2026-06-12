@@ -141,13 +141,88 @@ export async function generateReportPDF(record, aiText) {
     doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
   }
 
-  // ── Pruebas visuales (13) ─────────────────────────────────────────────
+  // ── Prescripción óptica ──────────────────────────────────────────────
+  if (record.odEsfera !== null && record.odEsfera !== undefined) {
+    if (y > 220) { doc.addPage(); y = 20; }
+    const validada = !!record.prescripcionValidada;
+    doc.setFontSize(11); doc.setFont("helvetica","bold");
+    doc.setTextColor(15,15,35);
+    doc.text(validada ? "Prescripción óptica validada" : "Prescripción óptica (estimación pendiente de validación)", M, y);
+    y += 9;
+
+    // Table header
+    doc.setFontSize(8.5); doc.setFont("helvetica","bold");
+    doc.setTextColor(130,130,142);
+    const c0 = M, c1 = M + 22, c2 = M + 62, c3 = M + 102;
+    doc.text("", c0, y);
+    doc.text("ESFERA", c1, y, { align: "left" });
+    doc.text("CILINDRO", c2, y, { align: "left" });
+    doc.text("EJE", c3, y, { align: "left" });
+    y += 6;
+
+    const fmt = n => (n === null || n === undefined) ? "—" : (n > 0 ? `+${Number(n).toFixed(2)}` : Number(n).toFixed(2));
+    const rxRows = [
+      ["OD", record.odEsfera, record.odCilindro, record.odEje],
+      ["OI", record.oiEsfera, record.oiCilindro, record.oiEje],
+    ];
+    rxRows.forEach(([eye, esf, cil, eje]) => {
+      doc.setFontSize(9.5); doc.setFont("helvetica","bold");
+      doc.setTextColor(25,25,38);
+      doc.text(eye, c0, y);
+      doc.setFont("helvetica","normal");
+      doc.text(fmt(esf), c1, y);
+      doc.text(fmt(cil), c2, y);
+      doc.text(eje !== null && eje !== undefined ? `${eje}°` : "—", c3, y);
+      y += 7;
+    });
+    y += 1;
+
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.setTextColor(75,75,88);
+    doc.text(`Adición: ${record.adicion ? fmt(record.adicion) : "—"}`, M, y); y += 6;
+
+    if (record.pdBinocular) {
+      doc.text(`DP: ${record.pdBinocular} mm  (OD: ${record.pdOd ?? "—"} mm | OI: ${record.pdOi ?? "—"} mm)`, M, y); y += 6;
+    }
+    y += 2;
+
+    if (validada) {
+      doc.setFontSize(9.5); doc.setFont("helvetica","bold");
+      doc.setTextColor(15,15,35);
+      doc.text("Validado por:", M, y); y += 6;
+      doc.setFontSize(9); doc.setFont("helvetica","normal");
+      doc.setTextColor(45,45,58);
+      doc.text(`Optómetra: ${record.optometristaNombre || "—"}`, M, y); y += 6;
+      doc.text(`Tarjeta profesional: ${record.optometristaTarjeta || "—"}`, M, y); y += 6;
+      if (record.validadoEn) {
+        const fechaVal = new Date(record.validadoEn).toLocaleString("es-CO");
+        doc.text(`Fecha de validación: ${fechaVal}`, M, y); y += 6;
+      }
+      y += 1;
+      doc.setFontSize(8.5); doc.setFont("helvetica","italic");
+      doc.setTextColor(60,90,50);
+      const legalText = doc.splitTextToSize("Prescripción validada por profesional certificado en Colombia.", CW);
+      doc.text(legalText, M, y); y += 6 * legalText.length;
+    } else {
+      doc.setFontSize(8.5); doc.setFont("helvetica","italic");
+      doc.setTextColor(170,105,15);
+      const pendingText = doc.splitTextToSize(
+        "Esta prescripción es una estimación generada por IA. Debe ser revisada y validada por un optómetra certificado antes de fabricar sus lentes.",
+        CW
+      );
+      doc.text(pendingText, M, y); y += 6 * pendingText.length;
+    }
+    y += 4;
+    doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
+  }
+
+  // ── Pruebas visuales (15) ─────────────────────────────────────────────
   const vtRows = VT_TESTS.filter(t => record[t.key]);
   if (vtRows.length) {
     if (y > 230) { doc.addPage(); y = 20; }
     doc.setFontSize(11); doc.setFont("helvetica","bold");
     doc.setTextColor(15,15,35);
-    doc.text("Batería de 13 pruebas visuales", M, y); y += 8;
+    doc.text("Batería de 15 pruebas visuales", M, y); y += 8;
 
     const SEM_RGB = {
       green:  [42,100,18],

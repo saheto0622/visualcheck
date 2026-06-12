@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { wrap, btnP, btnS } from "../lib/styles";
 import { VT_TESTS } from "../lib/format";
+import { clockDialToAxis, estimateCylinder } from "../lib/prescriptionAlgorithm";
 
 // ─── Shared constants ──────────────────────────────────────────────────────
-const TOTAL_TESTS = 13;
+const TOTAL_TESTS = 15;
 const TEST_TIMEOUT_MS = 60000;
 
 const DIRS = ["→", "←", "↑", "↓"];
@@ -47,6 +48,8 @@ const STEPS = [
   { key: "fusionBinocular",       num: 11, comp: "fusion" },
   { key: "estereopsis",           num: 12, comp: "estereopsis" },
   { key: "coordinacionBinocular", num: 13, comp: "coordinacion" },
+  { key: "astigmatismo",          num: 14, comp: "astigmatismo" },
+  { key: "lenteCruzada",          num: 15, comp: "lenteCruzada" },
 ];
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
@@ -685,18 +688,181 @@ function CoordinacionTest({ onDone, onSkip }) {
   );
 }
 
+// ─── 14. Astigmatismo (detección, eje y cilindro) ──────────────────────────────
+const CLOCK_NUMBERS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+function ClockDial({ size = 200, highlightPos, showNumbers }) {
+  const center = size / 2;
+  const r = size / 2 - 22;
+  const lines = [];
+  for (let i = 1; i <= 12; i++) {
+    const opposite = i > 6 ? i - 6 : i + 6;
+    const isHighlight = highlightPos === i || highlightPos === opposite;
+    const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
+    const x2 = center + r * Math.cos(angle);
+    const y2 = center + r * Math.sin(angle);
+    const x1 = center - r * Math.cos(angle);
+    const y1 = center - r * Math.sin(angle);
+    if (i <= 6) {
+      lines.push(
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke={isHighlight ? "#c83b3a" : "#999"} strokeWidth={isHighlight ? 3 : 1} />
+      );
+    }
+  }
+  const numbers = [];
+  if (showNumbers) {
+    for (let i = 1; i <= 12; i++) {
+      const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
+      const x = center + (r + 14) * Math.cos(angle);
+      const y = center + (r + 14) * Math.sin(angle);
+      numbers.push(
+        <text key={i} x={x} y={y} fontSize="11" textAnchor="middle" dominantBaseline="middle" fill="#777">{i}</text>
+      );
+    }
+  }
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width="100%" style={{ maxWidth: 220, display: "block", margin: "0 auto 1.25rem", background: "#fff", border: "0.5px solid var(--color-border-secondary)", borderRadius: "var(--border-radius-md)" }}>
+      <circle cx={center} cy={center} r={r + 4} fill="none" stroke="#ddd" strokeWidth={0.5} />
+      {lines}
+      {numbers}
+    </svg>
+  );
+}
+
+const CYLINDER_OPTIONS = [
+  ["Apenas diferente", "green"],
+  ["Notablemente diferente", "yellow"],
+  ["Muy diferente", "yellow"],
+  ["Extremadamente diferente", "red"],
+];
+
+function AstigmatismoTest({ onDone, onSkip }) {
+  const [step, setStep] = useState("A"); // A | B | C
+  const [clockPos, setClockPos] = useState(null);
+  const [axis, setAxis] = useState(null);
+
+  if (step === "A") {
+    return (
+      <TestShell num={14} title="Astigmatismo — Detección"
+        instructions='Observa el reloj con líneas radiales. Mira fijamente el centro. ¿Alguna línea se ve más oscura, más nítida o diferente a las demás?'
+        onSkip={onSkip}>
+        <ClockDial />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button style={btnP} onClick={() => onDone("Sin astigmatismo detectado (Cilindro: 0.00D, Eje: 0°)", "green", { cilindro: 0, eje: 0 })}>
+            No, todas las líneas se ven igual
+          </button>
+          <button style={btnS} onClick={() => setStep("B")}>Sí, una línea se ve diferente</button>
+        </div>
+      </TestShell>
+    );
+  }
+
+  if (step === "B") {
+    return (
+      <TestShell num={14} title="Astigmatismo — Identificación del eje"
+        instructions="¿Cuál número del reloj corresponde a la línea que se ve más oscura o diferente?"
+        onSkip={onSkip}>
+        <ClockDial showNumbers />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+          {CLOCK_NUMBERS.map(n => (
+            <button key={n} style={choiceBtn} onClick={() => { setClockPos(n); setAxis(clockDialToAxis(n)); setStep("C"); }}>{n}</button>
+          ))}
+        </div>
+      </TestShell>
+    );
+  }
+
+  // step C — cuantificación del cilindro
+  return (
+    <TestShell num={14} title="Astigmatismo — Cuantificación"
+      instructions={`Compara la línea que señalaste (posición ${clockPos}) con las demás líneas del reloj. ¿Qué tan diferente se ve esa línea comparada con las otras?`}
+      onSkip={onSkip}>
+      <ClockDial highlightPos={clockPos} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {CYLINDER_OPTIONS.map(([labelText, status]) => (
+          <button key={labelText} style={btnS} onClick={() => {
+            const cilindro = estimateCylinder(labelText);
+            onDone(`Cilindro: ${cilindro.toFixed(2)}D, Eje: ${axis}°`, status, { cilindro, eje: axis });
+          }}>{labelText}</button>
+        ))}
+      </div>
+    </TestShell>
+  );
+}
+
+// ─── 15. Lente cruzada (confirmación del eje) ──────────────────────────────────
+function CrossCylinderOvals({ axis1, axis2 }) {
+  return (
+    <svg viewBox="0 0 200 160" width="100%" style={{ maxWidth: 240, display: "block", margin: "0 auto 1.25rem", background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)" }}>
+      <ellipse cx={100} cy={80} rx={62} ry={34} transform={`rotate(${axis1} 100 80)`} fill="none" stroke="#3E72B5" strokeWidth={3} />
+      <ellipse cx={100} cy={80} rx={62} ry={34} transform={`rotate(${axis2} 100 80)`} fill="none" stroke="#D9534F" strokeWidth={3} />
+    </svg>
+  );
+}
+
+function LenteCruzadaTest({ astigData, onDone, onSkip, onRefineAxis }) {
+  const [axis, setAxis] = useState(() => astigData?.eje ?? 0);
+  const [iteration, setIteration] = useState(0);
+  const skipRef = useRef(false);
+
+  useEffect(() => {
+    if ((!astigData || astigData.cilindro === 0) && !skipRef.current) {
+      skipRef.current = true;
+      onDone("No aplica (sin astigmatismo detectado)", "gray");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!astigData || astigData.cilindro === 0) return null;
+
+  function handleChoice(choice) {
+    if (choice === "igual") {
+      onRefineAxis(axis);
+      onDone(`Eje confirmado: ${axis}°`, "green");
+      return;
+    }
+    if (iteration >= 2) {
+      onRefineAxis(axis);
+      onDone(`Eje ajustado: ${axis}°`, "yellow");
+      return;
+    }
+    const delta = choice === "arriba" ? -10 : 10;
+    const newAxis = ((axis + delta) % 180 + 180) % 180;
+    setAxis(newAxis);
+    setIteration(i => i + 1);
+  }
+
+  const axis2 = (axis + 45) % 180;
+
+  return (
+    <TestShell num={15} title="Confirmación del eje (lente cruzada)"
+      instructions="Observa los dos óvalos superpuestos. ¿Cuál de los dos se ve más redondo o más circular?"
+      onSkip={onSkip}>
+      <CrossCylinderOvals axis1={axis} axis2={axis2} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <button style={btnS} onClick={() => handleChoice("arriba")}>El de arriba-izquierda</button>
+        <button style={btnP} onClick={() => handleChoice("igual")}>Se ven igual</button>
+        <button style={btnS} onClick={() => handleChoice("abajo")}>El de abajo-derecha</button>
+      </div>
+    </TestShell>
+  );
+}
+
 // ─── Main component ─────────────────────────────────────────────────────────────
 export default function VisualTests({ onFinish }) {
   const [phase, setPhase] = useState("intro"); // intro | test | summary
   const [stepIdx, setStepIdx] = useState(0);
   const [results, setResults] = useState({});
   const [vtStatus, setVtStatus] = useState({});
+  const [astigData, setAstigData] = useState(null);
 
   const step = STEPS[stepIdx];
 
-  const finishStep = useCallback((key, value, status) => {
+  const finishStep = useCallback((key, value, status, rawData) => {
     setResults(prev => ({ ...prev, [key]: value }));
     setVtStatus(prev => ({ ...prev, [key]: status }));
+    if (key === "astigmatismo" && rawData) setAstigData(rawData);
     const nextIdx = stepIdx + 1;
     if (nextIdx >= STEPS.length) setPhase("summary");
     setStepIdx(nextIdx);
@@ -710,16 +876,17 @@ export default function VisualTests({ onFinish }) {
     return () => clearTimeout(t);
   }, [phase, stepIdx, finishStep]);
 
-  function handleDone(value, status) { finishStep(step.key, value, status); }
+  function handleDone(value, status, rawData) { finishStep(step.key, value, status, rawData); }
   function handleSkip() { finishStep(step.key, "Omitida por el paciente", "gray"); }
+  function handleRefineAxis(eje) { setAstigData(prev => prev ? { ...prev, eje } : prev); }
 
   if (phase === "intro") {
     return (
       <div style={wrap}>
         <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px", fontWeight: 500, letterSpacing: ".06em" }}>PRUEBAS VISUALES</p>
-        <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>Batería de 13 pruebas visuales</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>Batería de 15 pruebas visuales</h2>
         <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "0 0 1.25rem", lineHeight: 1.6 }}>
-          Haremos 13 pruebas rápidas antes de la foto: agudeza visual, contraste, colores, rejilla de Amsler, acomodación, duocromo, aniseiconía, campo visual, laberinto, fusión binocular, estereopsis y coordinación binocular. Cada una toma menos de un minuto y puedes omitirla si lo necesitas.
+          Haremos 15 pruebas rápidas antes de la foto: agudeza visual, contraste, colores, rejilla de Amsler, acomodación, duocromo, aniseiconía, campo visual, laberinto, fusión binocular, estereopsis, coordinación binocular y astigmatismo. Cada una toma menos de un minuto y puedes omitirla si lo necesitas.
         </p>
         <div style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "10px 12px", margin: "0 0 1.25rem", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
           📏 Sostén el celular a la distancia de tu brazo. Busca buena iluminación y un lugar tranquilo.
@@ -745,6 +912,8 @@ export default function VisualTests({ onFinish }) {
       case "fusion":       return <FusionTest key={step.key} {...props} />;
       case "estereopsis":  return <EstereopsisTest key={step.key} {...props} />;
       case "coordinacion": return <CoordinacionTest key={step.key} {...props} />;
+      case "astigmatismo": return <AstigmatismoTest key={step.key} {...props} />;
+      case "lenteCruzada": return <LenteCruzadaTest key={step.key} {...props} astigData={astigData} onRefineAxis={handleRefineAxis} />;
       default: return null;
     }
   }
@@ -753,7 +922,7 @@ export default function VisualTests({ onFinish }) {
   return (
     <div style={wrap}>
       <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 8px", fontWeight: 500, letterSpacing: ".06em" }}>RESULTADOS VISUALES</p>
-      <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 1.25rem" }}>Tus 13 pruebas visuales</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 1.25rem" }}>Tus 15 pruebas visuales</h2>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: "1.5rem" }}>
         {STEPS.map(s => {
           const status = vtStatus[s.key] || "gray";
@@ -769,7 +938,7 @@ export default function VisualTests({ onFinish }) {
           );
         })}
       </div>
-      <button style={btnP} onClick={() => onFinish({ ...results, vtStatus })}>Continuar con la foto de tus ojos →</button>
+      <button style={btnP} onClick={() => onFinish({ ...results, vtStatus, astigmatismoData: astigData })}>Continuar →</button>
     </div>
   );
 }

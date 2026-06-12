@@ -34,6 +34,14 @@ function emptyForm(ev) {
   };
 }
 
+function emptyRxForm(ev) {
+  return {
+    odEsfera:   ev?.odEsfera   ?? "", odCilindro: ev?.odCilindro ?? "", odEje: ev?.odEje ?? "",
+    oiEsfera:   ev?.oiEsfera   ?? "", oiCilindro: ev?.oiCilindro ?? "", oiEje: ev?.oiEje ?? "",
+    adicion:    ev?.adicion    ?? "",
+  };
+}
+
 export default function OptometristPanel({ onExit }) {
   const [view, setView] = useState("login"); // login | dashboard | caso
   const [code, setCode] = useState("");
@@ -46,6 +54,9 @@ export default function OptometristPanel({ onExit }) {
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [rxForm, setRxForm] = useState(emptyRxForm());
+  const [savingRx, setSavingRx] = useState(false);
+  const [rxMsg, setRxMsg] = useState("");
 
   async function login() {
     const codigo = code.trim();
@@ -89,8 +100,45 @@ export default function OptometristPanel({ onExit }) {
   function abrirCaso(ev) {
     setSelected(ev);
     setForm(emptyForm(ev));
+    setRxForm(emptyRxForm(ev));
     setSaveMsg("");
+    setRxMsg("");
     setView("caso");
+  }
+
+  async function guardarPrescripcion(ajustar) {
+    setSavingRx(true);
+    setRxMsg("");
+    const updates = ajustar ? {
+      od_esfera: parseNum(rxForm.odEsfera), od_cilindro: parseNum(rxForm.odCilindro), od_eje: parseEje(rxForm.odEje),
+      oi_esfera: parseNum(rxForm.oiEsfera), oi_cilindro: parseNum(rxForm.oiCilindro), oi_eje: parseEje(rxForm.oiEje),
+      adicion: parseNum(rxForm.adicion),
+      prescripcion_validada: true,
+      prescripcion_ajustada: true,
+    } : {
+      prescripcion_validada: true,
+      prescripcion_ajustada: false,
+    };
+    try {
+      await supabase.from("evaluaciones").update(updates).eq("id", selected.id);
+      const updated = {
+        ...selected,
+        ...(ajustar ? {
+          odEsfera: updates.od_esfera, odCilindro: updates.od_cilindro, odEje: updates.od_eje,
+          oiEsfera: updates.oi_esfera, oiCilindro: updates.oi_cilindro, oiEje: updates.oi_eje,
+          adicion: updates.adicion,
+        } : {}),
+        prescripcionValidada: updates.prescripcion_validada,
+        prescripcionAjustada: updates.prescripcion_ajustada,
+      };
+      setSelected(updated);
+      setRxForm(emptyRxForm(updated));
+      setCasos(prev => prev.map(c => c.id === updated.id ? updated : c));
+      setRxMsg("✓ Prescripción validada");
+    } catch {
+      setRxMsg("Error al guardar. Intenta de nuevo.");
+    }
+    setSavingRx(false);
   }
 
   async function guardar(aprobar) {
@@ -312,6 +360,80 @@ export default function OptometristPanel({ onExit }) {
             </div>
           )}
         </div>
+
+        {(selected.odEsfera !== null && selected.odEsfera !== undefined) && (
+          <div style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <p style={{ ...sectionTitle, margin: 0 }}>PRESCRIPCIÓN ESTIMADA POR IA</p>
+              {selected.prescripcionConfianza && (
+                <span style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-secondary)" }}>
+                  {{ alta: "🟢", media: "🟡", baja: "🔴" }[selected.prescripcionConfianza] || ""} Confianza {selected.prescripcionConfianza}
+                </span>
+              )}
+            </div>
+            {selected.prescripcionNotas && (
+              <p style={{ fontSize: 11.5, color: "var(--color-text-secondary)", margin: "0 0 10px", lineHeight: 1.5, fontStyle: "italic" }}>{selected.prescripcionNotas}</p>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
+              {[
+                { side: "Od", title: "Ojo Derecho (OD)" },
+                { side: "Oi", title: "Ojo Izquierdo (OI)" },
+              ].map(({ side, title }) => (
+                <div key={side}>
+                  <p style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>{title}</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[
+                      { key: `${side === "Od" ? "od" : "oi"}Esfera`, l: "Esfera", step: "0.25" },
+                      { key: `${side === "Od" ? "od" : "oi"}Cilindro`, l: "Cilindro", step: "0.25" },
+                      { key: `${side === "Od" ? "od" : "oi"}Eje`, l: "Eje", step: "1", min: 0, max: 180 },
+                    ].map(f => (
+                      <div key={f.key}>
+                        <label style={label}>{f.l}</label>
+                        <input
+                          type="number"
+                          step={f.step}
+                          min={f.min}
+                          max={f.max}
+                          value={rxForm[f.key]}
+                          onChange={e => setRxForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                          style={input}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={label}>Adición</label>
+              <input
+                type="number"
+                step="0.25"
+                value={rxForm.adicion}
+                onChange={e => setRxForm(prev => ({ ...prev, adicion: e.target.value }))}
+                style={input}
+              />
+            </div>
+            {selected.prescripcionValidada && (
+              <p style={{ fontSize: 12, color: "var(--color-text-success)", margin: "0 0 10px" }}>
+                ✓ Prescripción validada{selected.prescripcionAjustada ? " (ajustada por el optómetra)" : " (valores de IA confirmados)"}
+              </p>
+            )}
+            {rxMsg && (
+              <p style={{ fontSize: 12, color: rxMsg.startsWith("✓") ? "var(--color-text-success)" : "var(--color-text-danger)", margin: "0 0 8px", textAlign: "center" }}>
+                {rxMsg}
+              </p>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button style={{ ...btnS, opacity: savingRx ? 0.6 : 1 }} onClick={() => guardarPrescripcion(false)} disabled={savingRx}>
+                Confirmar prescripción
+              </button>
+              <button style={{ ...btnP, opacity: savingRx ? 0.6 : 1 }} onClick={() => guardarPrescripcion(true)} disabled={savingRx}>
+                Ajustar y validar
+              </button>
+            </div>
+          </div>
+        )}
 
         <div style={card}>
           <p style={sectionTitle}>FÓRMULA MÉDICA</p>

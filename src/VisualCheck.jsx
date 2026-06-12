@@ -7,6 +7,7 @@ import OptometristPanel from "./components/OptometristPanel";
 import AdminOptometrists from "./components/AdminOptometrists";
 import VisualTests from "./components/VisualTests";
 import PDMeasurement from "./components/PDMeasurement";
+import PrescriptionEstimate from "./components/PrescriptionEstimate";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -90,7 +91,7 @@ export default function VisualCheck() {
   // Historia clínica básica
   const [historia, setHistoria] = useState({
     hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "",
-    hcCirugiaOcular: "", hcUltimaFormula: "",
+    hcCirugiaOcular: "", hcUltimaFormula: "", edadRango: "",
   });
   // Landing page
   const [evalCount, setEvalCount] = useState(null);
@@ -102,6 +103,8 @@ export default function VisualCheck() {
   const [misError,      setMisError]      = useState("");
   // Distancia pupilar (PD)
   const [pd, setPd] = useState(null);
+  // Prescripción óptica estimada por IA
+  const [prescripcion, setPrescripcion] = useState(null);
 
   const videoRef   = useRef(null);
   const overlayRef = useRef(null);
@@ -269,6 +272,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         ...historia,
         ...vtResults,
         ...(pd || {}),
+        ...prescripcionFields(),
         estadoValidacion: "pendiente",
       };
       await generateReportPDF(record, aiText || fallbackText(result.overall));
@@ -299,6 +303,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       consentimientoFecha: consentTimestamp,
       ...historia,
       ...vtResults,
+      ...prescripcionFields(),
     };
     try {
       await supabase.from("evaluaciones").insert(toDb(record));
@@ -445,15 +450,37 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
   function handleVtFinish(vtRes) {
     setVtResults(vtRes);
+    setScreen("prescription_estimate");
+  }
+
+  function handlePrescriptionContinue(rx) {
+    setPrescripcion(rx);
     setScreen("camera");
+  }
+
+  function prescripcionFields() {
+    if (!prescripcion) return {};
+    return {
+      odEsfera: prescripcion.od_esfera ?? null,
+      odCilindro: prescripcion.od_cilindro ?? null,
+      odEje: prescripcion.od_eje ?? null,
+      oiEsfera: prescripcion.oi_esfera ?? null,
+      oiCilindro: prescripcion.oi_cilindro ?? null,
+      oiEje: prescripcion.oi_eje ?? null,
+      adicion: prescripcion.adicion ?? null,
+      prescripcionConfianza: prescripcion.confianza ?? null,
+      prescripcionNotas: prescripcion.notas ?? null,
+      prescripcionValidada: false,
+      prescripcionAjustada: false,
+    };
   }
 
   function reset() {
     setScreen("welcome"); setQIndex(0); setAnswers({}); setResult(null); setAiText(""); setUserData({ nombre: "", cedula: "", direccion: "", correo: "", celular: "" }); setAdminPin(""); setFiltroRiesgo("todos"); setFiltroValidacion("todos"); setVtResults({});
     setConsentAccepted(false); setConsentTimestamp(null);
-    setHistoria({ hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "", hcCirugiaOcular: "", hcUltimaFormula: "" });
+    setHistoria({ hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "", hcCirugiaOcular: "", hcUltimaFormula: "", edadRango: "" });
     setMisCedula(""); setMisResultados(null); setMisError("");
-    setPd(null);
+    setPd(null); setPrescripcion(null);
   }
 
   // ── Welcome ────────────────────────────────────────────────────────────────
@@ -747,6 +774,11 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     return <VisualTests onFinish={handleVtFinish} />;
   }
 
+  // ── Prescripción estimada por IA ─────────────────────────────────────────────
+  if (screen === "prescription_estimate") {
+    return <PrescriptionEstimate vtResults={vtResults} edadRango={historia.edadRango} onContinue={handlePrescriptionContinue} />;
+  }
+
   // ── Medición de distancia pupilar (PD) ───────────────────────────────────────
   if (screen === "pd_measurement") {
     return <PDMeasurement onConfirm={handlePdConfirm} onCancel={() => setScreen("results")} />;
@@ -834,7 +866,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
         {vtResults.vtStatus && (
           <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: "1.25rem" }}>
-            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>PRUEBAS VISUALES (13)</p>
+            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>PRUEBAS VISUALES (15)</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {VT_TESTS.filter(t => vtResults[t.key]).map(({ key, label }) => {
                 const status = vtResults.vtStatus?.[key] || "gray";
@@ -846,6 +878,43 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {prescripcion && (
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: "1.25rem" }}>
+            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>PRESCRIPCIÓN ÓPTICA (ESTIMADA)</p>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 8 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left", padding: "2px 4px", fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500 }}></th>
+                  <th style={{ textAlign: "right", padding: "2px 4px", fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500 }}>ESFERA</th>
+                  <th style={{ textAlign: "right", padding: "2px 4px", fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500 }}>CILINDRO</th>
+                  <th style={{ textAlign: "right", padding: "2px 4px", fontSize: 10, color: "var(--color-text-tertiary)", fontWeight: 500 }}>EJE</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderTop: "0.5px solid var(--color-border-tertiary)" }}>
+                  <td style={{ padding: "6px 4px", fontWeight: 500, color: "var(--color-text-primary)" }}>OD</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.od_esfera}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.od_cilindro}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.od_eje}°</td>
+                </tr>
+                <tr style={{ borderTop: "0.5px solid var(--color-border-tertiary)" }}>
+                  <td style={{ padding: "6px 4px", fontWeight: 500, color: "var(--color-text-primary)" }}>OI</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.oi_esfera}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.oi_cilindro}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", color: "var(--color-text-primary)" }}>{prescripcion.oi_eje}°</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>
+              <span>Adición</span>
+              <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>{prescripcion.adicion > 0 ? `+${prescripcion.adicion.toFixed(2)}` : "—"}</span>
+            </div>
+            <div style={{ padding: "8px 10px", borderRadius: "var(--border-radius-md)", background: "var(--color-background-warning)", textAlign: "center" }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-warning)" }}>⏳ Pendiente validación optómetra</span>
             </div>
           </div>
         )}
