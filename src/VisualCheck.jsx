@@ -6,6 +6,7 @@ import { wrap, btnP, btnS, input } from "./lib/styles";
 import OptometristPanel from "./components/OptometristPanel";
 import AdminOptometrists from "./components/AdminOptometrists";
 import VisualTests from "./components/VisualTests";
+import PDMeasurement from "./components/PDMeasurement";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -99,6 +100,8 @@ export default function VisualCheck() {
   const [misResultados, setMisResultados] = useState(null);
   const [misLoading,    setMisLoading]    = useState(false);
   const [misError,      setMisError]      = useState("");
+  // Distancia pupilar (PD)
+  const [pd, setPd] = useState(null);
 
   const videoRef   = useRef(null);
   const overlayRef = useRef(null);
@@ -212,7 +215,7 @@ export default function VisualCheck() {
   }
 
   function processResult(res) {
-    const fullRes = { ...res, fecha: new Date().toLocaleString("es-CO") };
+    const fullRes = { ...res, id: Date.now(), fecha: new Date().toLocaleString("es-CO") };
     setResult(fullRes);
     fetchAI(fullRes);
     saveEval(fullRes);
@@ -265,6 +268,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
         asym: result.asym, qScore: result.qScore,
         ...historia,
         ...vtResults,
+        ...(pd || {}),
         estadoValidacion: "pendiente",
       };
       await generateReportPDF(record, aiText || fallbackText(result.overall));
@@ -276,7 +280,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
 
   async function saveEval(res) {
     const record = {
-      id: Date.now(),
+      id: res.id,
       fecha: res.fecha,
       nombre:    userData.nombre,
       cedula:    userData.cedula,
@@ -322,6 +326,19 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
       setMisError("No se pudo buscar tu historial. Intenta de nuevo.");
     }
     setMisLoading(false);
+  }
+
+  async function handlePdConfirm(pdData) {
+    setPd(pdData);
+    setScreen("results");
+    try {
+      await supabase.from("evaluaciones").update({
+        pd_binocular: pdData.pdBinocular,
+        pd_od: pdData.pdOd,
+        pd_oi: pdData.pdOi,
+        pd_precision: pdData.pdPrecision,
+      }).eq("id", result.id);
+    } catch (e) { console.error("PD update:", e); }
   }
 
   async function descargarPDFResultado(ev) {
@@ -436,6 +453,7 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     setConsentAccepted(false); setConsentTimestamp(null);
     setHistoria({ hcUsaGafas: "", hcDiabetesHipertension: "", hcAntecedentesFamiliares: "", hcCirugiaOcular: "", hcUltimaFormula: "" });
     setMisCedula(""); setMisResultados(null); setMisError("");
+    setPd(null);
   }
 
   // ── Welcome ────────────────────────────────────────────────────────────────
@@ -729,6 +747,11 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
     return <VisualTests onFinish={handleVtFinish} />;
   }
 
+  // ── Medición de distancia pupilar (PD) ───────────────────────────────────────
+  if (screen === "pd_measurement") {
+    return <PDMeasurement onConfirm={handlePdConfirm} onCancel={() => setScreen("results")} />;
+  }
+
   // ── Camera ─────────────────────────────────────────────────────────────────
   if (screen === "camera") return (
     <div style={wrap}>
@@ -827,6 +850,25 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
           </div>
         )}
 
+        {pd && (
+          <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "14px", marginBottom: "1.25rem" }}>
+            <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: ".05em" }}>DISTANCIA PUPILAR (PD)</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              {[
+                ["Binocular", pd.pdBinocular],
+                ["OD", pd.pdOd],
+                ["OI", pd.pdOi],
+              ].map(([label, val]) => (
+                <div key={label} style={{ background: "var(--color-background-secondary)", borderRadius: "var(--border-radius-md)", padding: "8px", textAlign: "center" }}>
+                  <p style={{ fontSize: 10, color: "var(--color-text-tertiary)", margin: "0 0 2px" }}>{label}</p>
+                  <p style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", margin: 0 }}>{val} <span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>mm</span></p>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize: 10, color: "var(--color-text-tertiary)", margin: "8px 0 0" }}>Precisión: {pd.pdPrecision}</p>
+          </div>
+        )}
+
         <div style={{ border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "16px", marginBottom: "1.25rem" }}>
           <p style={{ fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 10px", letterSpacing: "0.05em" }}>RECOMENDACIÓN</p>
           {aiLoading
@@ -840,6 +882,12 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
             )
           }
         </div>
+
+        <button
+          style={{ ...btnS, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          onClick={() => setScreen("pd_measurement")}>
+          📏 {pd ? "Medir de nuevo mi distancia pupilar →" : "Medir mi distancia pupilar →"}
+        </button>
 
         <button
           style={{ ...btnS, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}

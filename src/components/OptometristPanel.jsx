@@ -300,6 +300,17 @@ export default function OptometristPanel({ onExit }) {
               <p style={{ fontSize: 12, color: "var(--color-text-tertiary)", margin: 0 }}>Sin pruebas registradas</p>
             )}
           </div>
+          {selected.pdBinocular && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "0.5px solid var(--color-border-tertiary)" }}>
+              <p style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-tertiary)", margin: "0 0 6px", letterSpacing: ".05em" }}>DISTANCIA PUPILAR (PD)</p>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "var(--color-text-secondary)" }}>
+                <span>Binocular: <strong style={{ color: "var(--color-text-primary)" }}>{selected.pdBinocular} mm</strong></span>
+                <span>OD: <strong style={{ color: "var(--color-text-primary)" }}>{selected.pdOd} mm</strong></span>
+                <span>OI: <strong style={{ color: "var(--color-text-primary)" }}>{selected.pdOi} mm</strong></span>
+                <span>Precisión: <strong style={{ color: "var(--color-text-primary)" }}>{selected.pdPrecision}</strong></span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={card}>

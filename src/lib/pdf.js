@@ -122,6 +122,25 @@ export async function generateReportPDF(record, aiText) {
     doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
   }
 
+  // ── Distancia pupilar (PD) ──────────────────────────────────────────────
+  if (record.pdBinocular) {
+    if (y > 255) { doc.addPage(); y = 20; }
+    doc.setFontSize(11); doc.setFont("helvetica","bold");
+    doc.setTextColor(15,15,35);
+    doc.text("Distancia Pupilar", M, y); y += 8;
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    doc.setTextColor(75,75,88);
+    doc.text(`PD Total: ${record.pdBinocular} mm`, M, y);
+    doc.text(`OD: ${record.pdOd ?? "—"} mm  |  OI: ${record.pdOi ?? "—"} mm`, M + 70, y);
+    y += 6;
+    doc.text(`Precisión: ${record.pdPrecision || "—"}`, M, y); y += 6;
+    doc.setFontSize(8); doc.setFont("helvetica","italic");
+    doc.setTextColor(130,130,142);
+    doc.text("Esta medida es necesaria para la fabricación de sus lentes.", M, y); y += 6;
+    y += 4;
+    doc.setDrawColor(235,235,242); doc.line(M, y, W - M, y); y += 10;
+  }
+
   // ── Pruebas visuales (13) ─────────────────────────────────────────────
   const vtRows = VT_TESTS.filter(t => record[t.key]);
   if (vtRows.length) {

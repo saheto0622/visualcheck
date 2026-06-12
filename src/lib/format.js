@@ -93,6 +93,10 @@ export function toDb(r) {
     hc_antecedentes_familiares: r.hcAntecedentesFamiliares ?? null,
     hc_cirugia_ocular: r.hcCirugiaOcular ?? null,
     hc_ultima_formula: r.hcUltimaFormula ?? null,
+    pd_binocular: r.pdBinocular ?? null,
+    pd_od: r.pdOd ?? null,
+    pd_oi: r.pdOi ?? null,
+    pd_precision: r.pdPrecision ?? null,
     vt_status: r.vtStatus ?? null,
   };
   VT_TESTS.forEach(({ key, db }) => { row[db] = r[key] ?? null; });
@@ -118,6 +122,10 @@ export function fromDb(row) {
     hcAntecedentesFamiliares: row.hc_antecedentes_familiares,
     hcCirugiaOcular: row.hc_cirugia_ocular,
     hcUltimaFormula: row.hc_ultima_formula,
+    pdBinocular: row.pd_binocular,
+    pdOd: row.pd_od,
+    pdOi: row.pd_oi,
+    pdPrecision: row.pd_precision,
     vtStatus: row.vt_status || {},
   };
   VT_TESTS.forEach(({ key, db }) => { out[key] = row[db]; });
