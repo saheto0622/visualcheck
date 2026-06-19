@@ -9,6 +9,12 @@ import VisualTests from "./components/VisualTests";
 import PDMeasurement from "./components/PDMeasurement";
 import PrescriptionEstimate from "./components/PrescriptionEstimate";
 import EyeCapture from "./components/EyeCapture";
+import Catalog from "./components/Catalog";
+import ProductDetail from "./components/ProductDetail";
+import Cart from "./components/Cart";
+import Checkout from "./components/Checkout";
+import OrderConfirmation from "./components/OrderConfirmation";
+import AdminPedidos from "./components/AdminPedidos";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -134,6 +140,10 @@ export default function VisualCheck() {
   const [pd, setPd] = useState(null);
   // Prescripción óptica estimada por IA
   const [prescripcion, setPrescripcion] = useState(null);
+  // E-commerce
+  const [cart,                 setCart]                 = useState([]);
+  const [selectedFrame,        setSelectedFrame]        = useState(null);
+  const [orderConfirmationData,setOrderConfirmationData]= useState(null);
 
   useEffect(() => {
     (async () => {
@@ -144,6 +154,19 @@ export default function VisualCheck() {
         setEvalCount(null);
       }
     })();
+  }, []);
+
+  // Detectar retorno de MercadoPago por URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get("payment_status");
+    const orderId       = params.get("order_id");
+    const collectionId  = params.get("collection_id");
+    if (paymentStatus || collectionId) {
+      setOrderConfirmationData({ paymentStatus, orderId, collectionId });
+      setScreen("pedido_confirmado");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
 
   async function handleEyesCaptured({ photoOD, photoOI }) {
@@ -494,6 +517,11 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
           onClick={() => setScreen("mis_resultados")}>
           ◆ Mis resultados
         </p>
+        <button
+          style={{ width: "100%", padding: "12px", fontSize: 14, fontWeight: 500, cursor: "pointer", background: "rgba(255,255,255,0.12)", color: "#fff", border: "0.5px solid rgba(255,255,255,0.25)", borderRadius: "var(--border-radius-md)", marginTop: "0.75rem" }}
+          onClick={() => setScreen("catalogo")}>
+          🛍️ Tienda de monturas
+        </button>
 
         {/* FAQ */}
         <div style={{ marginTop: "2.5rem", textAlign: "left" }}>
@@ -1134,6 +1162,73 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
   // ── Admin: Optometrists management ────────────────────────────────────────
   if (screen === "admin_optometristas") return <AdminOptometrists onBack={() => { loadOptometristas(); setScreen("admin"); }} />;
 
+  // ── Admin: Pedidos ────────────────────────────────────────────────────────
+  if (screen === "admin_pedidos") return <AdminPedidos onBack={() => setScreen("admin")} />;
+
+  // ── Tienda: Catálogo ──────────────────────────────────────────────────────
+  if (screen === "catalogo") return (
+    <div style={{ position: "relative" }}>
+      <Catalog
+        onSelect={(frame) => { setSelectedFrame(frame); setScreen("producto"); }}
+        onBack={() => setScreen("welcome")}
+      />
+      {cart.length > 0 && (
+        <button
+          onClick={() => setScreen("carrito")}
+          style={{ position: "fixed", bottom: 24, right: 20, padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", background: "var(--color-text-primary)", color: "var(--color-background-primary)", border: "none", borderRadius: 30, boxShadow: "0 4px 16px rgba(0,0,0,0.2)", zIndex: 100 }}>
+          🛒 {cart.length} — Ver carrito
+        </button>
+      )}
+    </div>
+  );
+
+  // ── Tienda: Detalle de producto ───────────────────────────────────────────
+  if (screen === "producto" && selectedFrame) return (
+    <div style={{ position: "relative" }}>
+      <ProductDetail
+        frame={selectedFrame}
+        cart={cart}
+        setCart={setCart}
+        onBack={() => setScreen("catalogo")}
+      />
+      {cart.length > 0 && (
+        <button
+          onClick={() => setScreen("carrito")}
+          style={{ position: "fixed", bottom: 24, right: 20, padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", background: "var(--color-text-primary)", color: "var(--color-background-primary)", border: "none", borderRadius: 30, boxShadow: "0 4px 16px rgba(0,0,0,0.2)", zIndex: 100 }}>
+          🛒 {cart.length} — Ver carrito
+        </button>
+      )}
+    </div>
+  );
+
+  // ── Tienda: Carrito ───────────────────────────────────────────────────────
+  if (screen === "carrito") return (
+    <Cart
+      cart={cart}
+      setCart={setCart}
+      onCheckout={() => setScreen("checkout")}
+      onContinueShopping={() => setScreen("catalogo")}
+    />
+  );
+
+  // ── Tienda: Checkout ──────────────────────────────────────────────────────
+  if (screen === "checkout") return (
+    <Checkout
+      cart={cart}
+      userData={userData}
+      onBack={() => setScreen("carrito")}
+      onGoToEval={() => setScreen("consent")}
+    />
+  );
+
+  // ── Tienda: Confirmación de pedido ────────────────────────────────────────
+  if (screen === "pedido_confirmado") return (
+    <OrderConfirmation
+      paymentData={orderConfirmationData}
+      onGoHome={() => { setCart([]); setOrderConfirmationData(null); setScreen("welcome"); }}
+    />
+  );
+
   // ── Admin Dashboard ───────────────────────────────────────────────────────
   if (screen === "admin") {
     const ESTADOS = ["pendiente", "contactado", "cita agendada", "cliente"];
@@ -1163,6 +1258,9 @@ Tono empático, profesional, sin alarmar. Siempre recomendar consulta con optóm
             </button>
             <button onClick={() => { loadEvals(); }} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
               <i className="ti ti-refresh" aria-hidden="true" />
+            </button>
+            <button onClick={() => setScreen("admin_pedidos")} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
+              🛍️ Pedidos
             </button>
             <button onClick={() => setScreen("admin_optometristas")} style={{ ...btnS, width: "auto", padding: "7px 12px", fontSize: 12 }}>
               <i className="ti ti-stethoscope" aria-hidden="true" />
