@@ -9,10 +9,17 @@ export async function crearPreferencia({ items, amount, orderId }) {
     body: JSON.stringify({ items, amount, orderId, backUrl }),
   });
 
+  const data = await response.json().catch(() => ({}));
+
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || "Error al crear preferencia de pago");
+    // Construir mensaje de error con el máximo detalle disponible
+    const detail = data.mp_cause
+      ? ` (MP ${data.mp_status}: ${JSON.stringify(data.mp_cause)})`
+      : data.token_type
+      ? ` [Token tipo: ${data.token_type}]`
+      : "";
+    throw new Error((data.error || "Error al crear preferencia de pago") + detail);
   }
 
-  return response.json(); // { init_point: "https://..." }
+  return data; // { init_point: "https://...", id: "..." }
 }
