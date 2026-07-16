@@ -53,13 +53,19 @@ const STEPS = [
 ];
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
+const CHEER = ["","¡Buen comienzo! 👋","","¡Vas muy bien! 🙌","","¡Más de la mitad! 💪","","¡Vas excelente! ⭐","","¡Casi terminas! 🔥","","¡Increíble! 🎯","","¡Última prueba! 🏁",""];
+
 function TestShell({ num, title, instructions, onSkip, children }) {
+  const cheer = CHEER[num - 1];
   return (
     <div style={wrap}>
-      <div style={{ height: 3, background: "var(--color-border-tertiary)", borderRadius: 2, marginBottom: "1.25rem", overflow: "hidden" }}>
-        <div style={{ height: 3, width: `${(num / TOTAL_TESTS) * 100}%`, background: "var(--color-text-info)", borderRadius: 2, transition: "width .3s" }} />
+      <div style={{ height: 5, background: "var(--color-border-tertiary)", borderRadius: 3, marginBottom: "0.75rem", overflow: "hidden" }}>
+        <div style={{ height: 5, width: `${(num / TOTAL_TESTS) * 100}%`, background: "var(--color-text-info)", borderRadius: 3, transition: "width .4s" }} />
       </div>
-      <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: "0 0 4px", fontWeight: 500, letterSpacing: ".04em" }}>PRUEBA {num} DE {TOTAL_TESTS}</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)", margin: 0, fontWeight: 500, letterSpacing: ".04em" }}>PRUEBA {num} DE {TOTAL_TESTS}</p>
+        {cheer && <span style={{ fontSize: 11, color: "var(--color-text-success)", fontWeight: 500 }}>{cheer}</span>}
+      </div>
       <h3 style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", margin: "0 0 8px" }}>{title}</h3>
       {instructions && <p style={{ fontSize: 13, color: "var(--color-text-secondary)", margin: "0 0 1.25rem", lineHeight: 1.55 }}>{instructions}</p>}
       {children}
@@ -444,11 +450,16 @@ function CampoVisualTest({ eye, onDone, onSkip }) {
   const [order] = useState(() => shuffle(VF_POINTS.map((_, i) => i)));
   const [idx, setIdx] = useState(0);
   const [showing, setShowing] = useState(false);
+  const [flash, setFlash] = useState(false);
   const missesRef = useRef([]);
   const seenRef = useRef(false);
   const doneRef = useRef(false);
+  // Ref mirrors 'showing' so event handlers always read fresh value without stale closure
+  const showingRef = useRef(false);
   const coverEye = eye === "OD" ? "izquierdo" : "derecho";
   const titleEye = eye === "OD" ? "derecho" : "izquierdo";
+
+  useEffect(() => { showingRef.current = showing; }, [showing]);
 
   useEffect(() => {
     if (idx >= order.length) {
@@ -463,7 +474,8 @@ function CampoVisualTest({ eye, onDone, onSkip }) {
       return;
     }
     seenRef.current = false;
-    const showT = setTimeout(() => setShowing(true), 500 + Math.random() * 500);
+    // Randomize appearance delay 600-1200ms; total window until hide is 2600ms
+    const showT = setTimeout(() => setShowing(true), 600 + Math.random() * 600);
     const hideT = setTimeout(() => {
       setShowing(false);
       if (!seenRef.current) {
@@ -471,13 +483,18 @@ function CampoVisualTest({ eye, onDone, onSkip }) {
         missesRef.current = [...missesRef.current, VF_POINTS[pIdx].q];
       }
       setIdx(i => i + 1);
-    }, 1900);
+    }, 2600);
     return () => { clearTimeout(showT); clearTimeout(hideT); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
-  function handleTap() {
-    if (showing) seenRef.current = true;
+  function handleTap(e) {
+    e.preventDefault();
+    if (showingRef.current) {
+      seenRef.current = true;
+      setFlash(true);
+      setTimeout(() => setFlash(false), 180);
+    }
   }
 
   if (idx >= order.length) return null;
@@ -485,16 +502,28 @@ function CampoVisualTest({ eye, onDone, onSkip }) {
 
   return (
     <TestShell num={9} title={`Campo visual — Ojo ${titleEye}`}
-      instructions={`Cubre tu ojo ${coverEye}. Mantén la mirada fija en el punto central y toca la pantalla apenas veas aparecer un punto pequeño en cualquier lugar.`}
+      instructions={`Cubre tu ojo ${coverEye}. Mantén la mirada fija en el punto blanco central. Toca en cualquier parte de la pantalla oscura cuando veas aparecer un punto verde.`}
       onSkip={onSkip}>
-      <div onClick={handleTap} onTouchStart={handleTap}
-        style={{ position: "relative", width: "100%", paddingBottom: "100%", background: "#222", borderRadius: "var(--border-radius-md)", marginBottom: "1.25rem", touchAction: "none" }}>
-        <div style={{ position: "absolute", left: "50%", top: "50%", width: 10, height: 10, marginLeft: -5, marginTop: -5, borderRadius: "50%", background: "#fff" }} />
+      <div
+        onPointerDown={handleTap}
+        style={{
+          position: "relative", width: "100%", paddingBottom: "100%",
+          background: flash ? "#2a3a2a" : "#1a1a1a",
+          borderRadius: "var(--border-radius-md)", marginBottom: "1.25rem",
+          touchAction: "none", cursor: "pointer",
+          transition: "background 0.12s",
+          border: flash ? "2px solid #5DCAA5" : "2px solid transparent",
+        }}>
+        {/* Fixed center fixation point */}
+        <div style={{ position: "absolute", left: "50%", top: "50%", width: 12, height: 12, marginLeft: -6, marginTop: -6, borderRadius: "50%", background: "#fff", boxShadow: "0 0 4px rgba(255,255,255,0.5)" }} />
+        {/* Peripheral stimulus — larger for reliable touch detection */}
         {showing && (
-          <div style={{ position: "absolute", left: `${point.x}%`, top: `${point.y}%`, width: 14, height: 14, marginLeft: -7, marginTop: -7, borderRadius: "50%", background: "#5DCAA5" }} />
+          <div style={{ position: "absolute", left: `${point.x}%`, top: `${point.y}%`, width: 22, height: 22, marginLeft: -11, marginTop: -11, borderRadius: "50%", background: "#5DCAA5", boxShadow: "0 0 6px #5DCAA5" }} />
         )}
       </div>
-      <p style={{ fontSize: 12, color: "var(--color-text-tertiary)", textAlign: "center" }}>Punto {idx + 1} de {order.length}</p>
+      <p style={{ fontSize: 12, color: flash ? "#5DCAA5" : "var(--color-text-tertiary)", textAlign: "center", transition: "color 0.12s" }}>
+        {flash ? "¡Detectado!" : `Punto ${idx + 1} de ${order.length} — toca cuando veas el punto verde`}
+      </p>
     </TestShell>
   );
 }
@@ -504,7 +533,7 @@ const MAZE_POINTS = [
   { x: 30, y: 30 }, { x: 30, y: 110 }, { x: 130, y: 110 }, { x: 130, y: 50 },
   { x: 230, y: 50 }, { x: 230, y: 150 }, { x: 90, y: 150 }, { x: 90, y: 230 }, { x: 250, y: 230 },
 ];
-const MAZE_WIDTH = 280, MAZE_HEIGHT = 260, CORRIDOR = 30;
+const MAZE_WIDTH = 280, MAZE_HEIGHT = 260, CORRIDOR = 36;
 
 function distToSegment(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -523,10 +552,15 @@ function distToPath(p, points) {
 function LaberintoTest({ onDone, onSkip }) {
   const [phase, setPhase] = useState("od"); // od | switch | oi
   const [tracing, setTracing] = useState(false);
-  const [errors, setErrors] = useState(0);
+  const [trail, setTrail] = useState([]);
   const svgRef = useRef(null);
   const startTimeRef = useRef(null);
   const odResultRef = useRef(null);
+  // Refs for values needed inside pointer event handlers (avoids stale closure issues)
+  const tracingRef = useRef(false);
+  const errorsRef = useRef(0);
+
+  useEffect(() => { tracingRef.current = tracing; }, [tracing]);
 
   function getPoint(e) {
     const rect = svgRef.current.getBoundingClientRect();
@@ -537,36 +571,44 @@ function LaberintoTest({ onDone, onSkip }) {
   }
 
   function handleStart(e) {
+    e.preventDefault();
     const p = getPoint(e);
     const startPt = MAZE_POINTS[0];
-    if (Math.hypot(p.x - startPt.x, p.y - startPt.y) < CORRIDOR) {
+    if (Math.hypot(p.x - startPt.x, p.y - startPt.y) < CORRIDOR * 1.4) {
+      // setPointerCapture ensures all subsequent pointermove/up events reach this element
+      // even if the finger moves outside the SVG boundaries — critical for mobile drag
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      tracingRef.current = true;
+      errorsRef.current = 0;
       setTracing(true);
+      setTrail([p]);
       startTimeRef.current = performance.now();
-      setErrors(0);
     }
   }
 
   function handleMove(e) {
-    if (!tracing) return;
+    if (!tracingRef.current) return;
+    e.preventDefault();
     const p = getPoint(e);
+    setTrail(prev => [...prev, p]);
     const d = distToPath(p, MAZE_POINTS);
-    if (d > CORRIDOR / 2) setErrors(err => err + 1);
+    if (d > CORRIDOR / 2) errorsRef.current++;
     const end = MAZE_POINTS[MAZE_POINTS.length - 1];
     if (Math.hypot(p.x - end.x, p.y - end.y) < CORRIDOR) finishPass();
   }
 
   function finishPass() {
-    setTracing(prevTracing => {
-      if (!prevTracing) return prevTracing;
-      const time = (performance.now() - startTimeRef.current) / 1000;
-      if (phase === "od") {
-        odResultRef.current = { time, errors };
-        setPhase("switch");
-      } else {
-        evaluate(odResultRef.current, { time, errors });
-      }
-      return false;
-    });
+    if (!tracingRef.current) return;
+    tracingRef.current = false;
+    setTracing(false);
+    setTrail([]);
+    const time = (performance.now() - startTimeRef.current) / 1000;
+    if (phase === "od") {
+      odResultRef.current = { time, errors: errorsRef.current };
+      setPhase("switch");
+    } else {
+      evaluate(odResultRef.current, { time, errors: errorsRef.current });
+    }
   }
 
   function evaluate(od, oi) {
@@ -580,9 +622,9 @@ function LaberintoTest({ onDone, onSkip }) {
   if (phase === "switch") {
     return (
       <TestShell num={10} title="Laberinto — ojo ambliope"
-        instructions="Listo con el ojo derecho. Ahora cubre tu ojo derecho y descubre el izquierdo. Cuando estés list@, continúa."
+        instructions="¡Listo con el ojo derecho! Ahora cubre tu ojo derecho y descubre el izquierdo. Cuando estés list@, continúa."
         onSkip={onSkip}>
-        <button style={btnP} onClick={() => { setPhase("oi"); setErrors(0); }}>Continuar con el ojo izquierdo</button>
+        <button style={btnP} onClick={() => { setPhase("oi"); errorsRef.current = 0; setTrail([]); }}>Continuar con el ojo izquierdo</button>
       </TestShell>
     );
   }
@@ -593,18 +635,33 @@ function LaberintoTest({ onDone, onSkip }) {
 
   return (
     <TestShell num={10} title="Laberinto — ojo ambliope"
-      instructions={`Cubre tu ojo ${coverLabel} (usa el ${eyeLabel}). Traza el camino con el dedo desde el punto verde hasta el punto rojo, sin levantar el dedo.`}
+      instructions={`Cubre tu ojo ${coverLabel}. Pon el dedo en el punto verde y arrastra sin levantar hasta llegar al punto rojo.`}
       onSkip={onSkip}>
       <svg ref={svgRef} viewBox={`0 0 ${MAZE_WIDTH} ${MAZE_HEIGHT}`} width="100%"
-        style={{ maxWidth: 280, display: "block", margin: "0 auto 1rem", background: "#f4f4f8", borderRadius: "var(--border-radius-md)", touchAction: "none" }}
-        onPointerDown={handleStart} onPointerMove={handleMove} onPointerUp={finishPass}>
-        <polyline points={MAZE_POINTS.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke="#e0e0ea" strokeWidth={CORRIDOR} strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points={MAZE_POINTS.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke="#ccc" strokeWidth={1} strokeDasharray="3,3" />
-        <circle cx={MAZE_POINTS[0].x} cy={MAZE_POINTS[0].y} r={10} fill="#5DCAA5" />
-        <circle cx={last.x} cy={last.y} r={10} fill="#c83b3a" />
+        style={{ maxWidth: 300, display: "block", margin: "0 auto 1rem", background: "#f4f4f8", borderRadius: "var(--border-radius-md)", touchAction: "none", cursor: tracing ? "crosshair" : "grab" }}
+        onPointerDown={handleStart}
+        onPointerMove={handleMove}
+        onPointerUp={finishPass}
+        onPointerCancel={finishPass}>
+        {/* Path corridor — slightly wider for easier tracing */}
+        <polyline points={MAZE_POINTS.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke="#d8d8e8" strokeWidth={CORRIDOR * 2} strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={MAZE_POINTS.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke="#b0b0c8" strokeWidth={1.5} strokeDasharray="4,4" />
+        {/* User's finger trail */}
+        {trail.length > 1 && (
+          <polyline
+            points={trail.map(p => `${p.x},${p.y}`).join(" ")}
+            fill="none" stroke="rgba(93,202,165,0.7)" strokeWidth={10}
+            strokeLinecap="round" strokeLinejoin="round"
+          />
+        )}
+        {/* Start (green) and end (red) markers — larger for easier touch */}
+        <circle cx={MAZE_POINTS[0].x} cy={MAZE_POINTS[0].y} r={16} fill="#5DCAA5" />
+        <circle cx={last.x} cy={last.y} r={16} fill="#c83b3a" />
+        <text x={MAZE_POINTS[0].x} y={MAZE_POINTS[0].y + 1} textAnchor="middle" dominantBaseline="middle" fontSize="14" fill="white" fontWeight="bold">▶</text>
+        <text x={last.x} y={last.y + 1} textAnchor="middle" dominantBaseline="middle" fontSize="14" fill="white" fontWeight="bold">★</text>
       </svg>
-      <p style={{ fontSize: 12, color: "var(--color-text-tertiary)", textAlign: "center" }}>
-        {tracing ? "Sigue trazando..." : "Toca el punto verde para empezar"}
+      <p style={{ fontSize: 12, color: tracing ? "#5DCAA5" : "var(--color-text-tertiary)", textAlign: "center", transition: "color 0.2s" }}>
+        {tracing ? "¡Sigue sin levantar el dedo!" : "Toca el punto verde ▶ y arrastra hasta la estrella ★"}
       </p>
     </TestShell>
   );
